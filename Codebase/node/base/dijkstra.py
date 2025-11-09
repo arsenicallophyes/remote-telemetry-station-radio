@@ -1,10 +1,11 @@
 """
 Dijkstra's Algorithm
 """
-from typing import List, Set, Optional, Dict
+from typing import List, Set, Optional, Dict, Tuple
 from uuid import uuid4, UUID
 from Codebase.models.node import Node
-from pprint import pprint
+from Codebase.models.path import Path
+
 
 class Graph:
     """
@@ -19,6 +20,14 @@ class Graph:
 
         self.connections_matrix: List[List[float]] = [[0.0] * size for _ in range(size)]
 
+        self.init_base()
+
+    def init_base(self):
+        """
+        Initialize BASE. Private method, do not run.
+        """
+        self.base       = self.add_node("BASE")
+        self.base_index = 0
 
     def add_edge(self, node_a: str, node_b: str, weight: float) -> None:
         """
@@ -30,19 +39,27 @@ class Graph:
             self.connections_matrix[u][v] = weight
             self.connections_matrix[v][u] = weight
 
-    def add_node(self, name: str) -> None:
+    def add_node(self, name: str) -> Node:
         """
-        Creat a Node object with @name: str and
+        Create a Node object with the assigned name
+        
+        @name: str
+
+        Returns Node object
         """
         uuid = self.generate_id()
         self.node_ids.add(uuid)
-        self.nodes.append(Node(name, uuid))
+        node = Node(name, uuid)
+        self.nodes.append(node)
         self.nodes_index[name] = len(self.nodes) - 1
+        return node
 
     def generate_id(self) -> UUID:
         """
         Ensures returned identifier is not being used by a different node.
+
         Most cases the loop is unenecassry, as chances of collision are near impossible.
+
         However, conceptually this is more robust.
         """
         while (uuid:= uuid4()) in self.node_ids:
@@ -50,16 +67,18 @@ class Graph:
 
         return uuid
 
-    def dijkstra(self, base: str):
+    def dijkstra(self) -> Tuple[List[float], List[Optional[int]]]:
         """
         @node: Node must be the Base Station node.
-        returns the shortest distance from the Base Station to every node in the network.
-        """
-        base_index = self.nodes_index[base]
-        distances: List[float] = [float("inf")] * self.size
 
-        distances[base_index] = 0
-        visited: List[bool] = [False] * self.size
+        Returns the shortest distance from the Base Station to every node in the network.
+        """
+
+        distances:    List[float]         = [float("inf")] * self.size
+        predecessors: List[Optional[int]] = [None] * self.size
+        visited:      List[bool]          = [False] * self.size
+
+        distances[self.base_index] = 0
 
         for _ in range(self.size):
             min_dist = float("inf")
@@ -68,11 +87,8 @@ class Graph:
                 if not visited[node_index] and distances[node_index] < min_dist:
                     min_dist = distances[node_index]
                     closest_node = node_index
-                print(closest_node)
-            
+
             if closest_node is None:
-                print(closest_node)
-                print("brealig")
                 break
 
             visited[closest_node] = True
@@ -81,29 +97,63 @@ class Graph:
                 if self.connections_matrix[closest_node][neighbour_node] != 0 and not visited[neighbour_node]:
                     alternative_path = distances[closest_node] + self.connections_matrix[closest_node][neighbour_node]
                     if alternative_path < distances[neighbour_node]:
-                        distances[neighbour_node] = alternative_path
+                        distances[neighbour_node]    = alternative_path
+                        predecessors[neighbour_node] = closest_node
 
-        return distances
+        return distances, predecessors
+
+    def get_path(self, predecessors: List[Optional[int]], target_node: str, cost: float) -> Path:
+        """
+        @predecessors: A list of the predecessors node's indexes.
+
+        @target_node:  The target node to reach from BASE.
+
+        @cost:         The cost of the path.
+
+        returns Path object
+        """
+        path: List[Node] = []
+        current = self.nodes_index[target_node]
+
+        while current is not None:
+            path.insert(0, self.nodes[current])
+            current = predecessors[current]
+            if current == self.base_index:
+                path.insert(0, self.base)
+                break
+
+        return Path(path, cost)
+
+    def get_all_paths(self) -> List[Path]:
+        """
+        Runs Graph.get_path() on all registered nodes.
+
+        Returns a List[Path] for all nodes.
+        """
+        distances, predecessors = self.dijkstra()
+        paths: List[Path] = []
+
+        for i, cost in enumerate(distances):
+            path = self.get_path(predecessors, self.nodes[i].name, cost)
+            paths.append(path)
+
+        return paths
 
 if __name__ == "__main__":
     graph = Graph(4)
 
-    graph.add_node("A")
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
 
-    graph.add_edge("A", "B", 1)
-    graph.add_edge("A", "C", 3)
+    graph.add_edge("BASE", "B", 1)
+    graph.add_edge("BASE", "C", 3)
 
     graph.add_edge("B", "C", 1)
     graph.add_edge("B", "D", 5)
     graph.add_edge("C", "D", 2)
 
-    pprint(graph.connections_matrix)
-    pprint(graph.nodes_index,)
+    # paths = graph.get_all_paths()
 
-    print("\nDijkstra's Algorithm starting from vertex A:")
-    distancess = graph.dijkstra('A')
-    for i, d in enumerate(distancess):
-        print(f"Distance from A to {graph.nodes[i].name}: {d}")
+    # for path in paths:
+    #     print(path)
