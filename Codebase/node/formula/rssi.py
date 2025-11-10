@@ -18,8 +18,20 @@ class RSSI:
 
     @staticmethod
     def validate_bound(bound: int):
-        if bound <= 0:
-            raise ValueError(f"{bound} dBm is not a valid value. RSSI values must be lower than 0.")
+        """
+        Ensure RSSI bound is set between 0 dbm and -130 dbm.
+
+        Excellent: 0 to -60 dBm
+
+        Good: -60 to -80 dBm
+
+        Borderline: -90 to -100 dBm
+
+        Poor: -110 to -120 dBm
+
+        """
+        if -130 < bound < 0:
+            raise ValueError(f"{bound} dBm is not a valid value. RSSI values must be between 0 dBm and -130 dBm.")
     
     @staticmethod
     def validate_weight(weight: float):
@@ -31,14 +43,15 @@ class RSSI:
         Going above 40% may lead to unstable communications, as ETX is a more
         reliable method for measuring link reliability.
         """
-        if not 0 < weight <= 1:
+        if not 0.0 < weight <= 1.0:
             raise ValueError(f"{weight*100}% is not a valid weight. Weight must be higher than 0 and lower than 1.")
 
     def get_score(self, rssi: int) -> float:
         """
         Validate RSSI exists between lower_bound and upper_bound.
         
-        Return 1.0 if RSSI is greater than lower_bound, return 0.0 if RSSI is lower than upper_bound.
+        Return 1.0 if RSSI is greater than lower_bound,
+        return 0.0 if RSSI is lower than upper_bound.
 
         Perform RSSI score formula and return the score.
         """
