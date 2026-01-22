@@ -3,7 +3,7 @@ Dijkstra's Algorithm
 """
 from typing import List, Set, Optional, Dict, Tuple
 from uuid import uuid4, UUID
-from Codebase.models.node import Node
+from Codebase.node.node import Node
 from Codebase.models.path import Path
 
 

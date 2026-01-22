@@ -3,7 +3,7 @@ Define path object
 """
 from typing import List
 from uuid import UUID
-from Codebase.models.node import Node
+from Codebase.node.node import Node
 
 class Path:
 

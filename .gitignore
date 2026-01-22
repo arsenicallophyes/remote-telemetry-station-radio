@@ -1,8 +1,11 @@
 # Ignore the following
 /Documents
+/lib
+/.vscode
 
 # Ignore compiled Python files
 *.pyc
 __pycache__/
 *.diff
+
 

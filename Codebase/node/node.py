@@ -2,6 +2,8 @@
 Define object node
 """
 from uuid import UUID
+from Codebase.models.packet import Packet
+from Codebase.node.packet_type import PacketType as pt
 
 
 class Node:
@@ -24,3 +26,11 @@ class Node:
 
     def __str__(self) -> str:
         return self.name
+
+    def send(self, packet: Packet) -> None:
+        print(packet)
+
+    def receive(self) -> Packet:
+        node = Node(self.name, self.node_id)
+        packet = Packet(node, node, pt.ACK, "TEMP")
+        return packet
