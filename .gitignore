@@ -2,6 +2,7 @@
 /Documents
 /lib
 /.vscode
+/typings
 
 # Ignore compiled Python files
 *.pyc

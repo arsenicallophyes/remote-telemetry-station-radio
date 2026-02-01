@@ -1,12 +1,12 @@
 """
 Define node startup behavior
 """
-from Codebase.models.region import Region
-from Codebase.models.band   import Band
+from Codebase.node.utils.types.region import Region
+from Codebase.node.utils.types.band   import Band
 from Codebase.models.packet import Packet
 
 from Codebase.node.node              import Node
-from Codebase.node.packet_type       import PacketType as pt
+from Codebase.models.packet_type       import PacketType as pt
 from Codebase.node.utils.band_helper import BandHelper
 
 class Startup:
@@ -30,5 +30,6 @@ class Startup:
         self.node.send(packet)
 
 if __name__ == "__main__":
-    from uuid import uuid4
-    Startup(433.175, Region.EU, Band.EU433, Node("A", uuid4()))
+    pass
+    # from uuid import uuid4
+    # Startup(433.175, Region.EU, Band.EU433, Node("A", uuid4()))

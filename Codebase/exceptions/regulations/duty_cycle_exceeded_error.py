@@ -1,7 +1,7 @@
 """
 Define custom error for exceeding air time of a band.
 """
-from Codebase.regulations.regulation_error import RegulationError
+from Codebase.exceptions.regulations.regulation_error import RegulationError
 
 class DutyCycleExceededError(RegulationError):
     """

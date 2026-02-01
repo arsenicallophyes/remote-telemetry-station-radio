@@ -1,7 +1,7 @@
 """
 Define custom error for utilizinig licensed frequencies.
 """
-from Codebase.regulations.regulation_error import RegulationError
+from Codebase.exceptions.regulations.regulation_error import RegulationError
 
 class LicensedFrequencyError(RegulationError):
     """
