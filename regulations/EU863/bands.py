@@ -1,5 +1,5 @@
-from Codebase.regulations.band import Band
-from Codebase.regulations.duty_cycles import DutyCycles
+from regulations.band import Band
+from regulations.duty_cycles import DutyCycles
 
 BAND_K = Band(
     name="K",

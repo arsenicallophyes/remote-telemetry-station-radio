@@ -1,13 +1,13 @@
 """
 Define node startup behavior
 """
-from Codebase.node.utils.types.region import Region
-from Codebase.node.utils.types.band   import Band
-from Codebase.models.packet import Packet
+from node.node              import Node
+from node.utils.types.region import Region
+from node.utils.types.band   import Band
+from node.utils.band_helper import BandHelper
 
-from Codebase.node.node              import Node
-from Codebase.models.packet_type       import PacketType as pt
-from Codebase.node.utils.band_helper import BandHelper
+from models.packet import Packet
+from models.packet_type       import PacketType as pt
 
 class Startup:
     """

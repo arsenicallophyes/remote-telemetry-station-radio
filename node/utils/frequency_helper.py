@@ -10,7 +10,7 @@ spectrum of EU863-870 can be utilized
 • Minimum frequency: 863.000 MHz
 • Maximum frequency: 870.000 MHz
 """
-from Codebase.exceptions.regulations.licensed_frequency_error import LicensedFrequencyError
+from exceptions.regulations.licensed_frequency_error import LicensedFrequencyError
 
 class FrequencyHelper:
     """

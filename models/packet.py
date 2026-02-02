@@ -4,8 +4,8 @@ Define Packet dataclass
 from typing import Optional
 from dataclasses import dataclass
 
-from Codebase.models.packet_type import PacketType
-from Codebase.node.node        import Node
+from models.packet_type import PacketType
+from node.node          import Node
 
 @dataclass
 class Packet:

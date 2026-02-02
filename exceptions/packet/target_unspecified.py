@@ -1,8 +1,8 @@
 """
 Define custom error for exceeding permitted power usage.
 """
-from Codebase.exceptions.packet.packet_error import PacketError
-from Codebase.models.packet import Packet
+from exceptions.packet.packet_error import PacketError
+from models.packet import Packet
 
 class TargetUnspecifiedError(PacketError):
     """

@@ -1,6 +1,6 @@
 from typing import Optional
 from dataclasses import dataclass
-from Codebase.regulations.duty_cycles import DutyCycles
+from regulations.duty_cycles import DutyCycles
 
 
 @dataclass(frozen=True, slots=True)

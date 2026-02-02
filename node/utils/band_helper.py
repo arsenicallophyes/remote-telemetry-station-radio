@@ -1,9 +1,9 @@
 """
 Helper utility to automate frequency validation for all supported bands
 """
-from Codebase.models.region import Region
-from Codebase.models.band import Band
-from Codebase.node.utils.frequency_helper import FrequencyHelper
+from types.region import Region
+from types.band import Band
+from node.utils.frequency_helper import FrequencyHelper
 
 class BandHelper:
     """

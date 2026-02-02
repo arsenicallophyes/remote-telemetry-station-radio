@@ -1,7 +1,7 @@
 """
 Define custom error for exceeding permitted power usage.
 """
-from Codebase.exceptions.regulations.regulation_error import RegulationError
+from exceptions.regulations.regulation_error import RegulationError
 
 class PowerLimitExceededError(RegulationError):
     """

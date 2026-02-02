@@ -10,9 +10,9 @@ import busio
 import digitalio
 import adafruit_rfm9x
 
-from Codebase.models.packet import Packet
-from Codebase.models.model import SpreadingFactor, CodingRate
-from Codebase.models.packet_type import PacketType as pt
+from models.packet import Packet
+from models.model import SpreadingFactor, CodingRate
+from models.packet_type import PacketType as pt
 
 
 def require_radio_initialized(method: Callable[..., Any]) -> Callable[..., Any]:
