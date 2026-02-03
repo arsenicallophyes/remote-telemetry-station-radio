@@ -2,9 +2,6 @@
 Define node startup behavior
 """
 from node.node              import Node
-from node.utils.types.region import Region
-from node.utils.types.band   import Band
-from node.utils.band_helper import BandHelper
 
 from models.packet import Packet
 from models.packet_type       import PacketType as pt
@@ -13,10 +10,7 @@ class Startup:
     """
     Define node startup behavior
     """
-    def __init__(self, cmdf: float, region: Region, band: Band, node: Node) -> None:
-        Region.validate(region)
-        Band.validate(band)
-        BandHelper(region, band).validate(cmdf)
+    def __init__(self, node: Node) -> None:
         self.node = node
 
     def create_broadcast_packet(self) -> Packet:
