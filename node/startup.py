@@ -21,7 +21,7 @@ class Startup:
 
     def broadcast(self) -> None:
         packet = self.create_broadcast_packet()
-        self.node.send(packet)
+        self.node.transmit(packet)
 
 if __name__ == "__main__":
     pass

@@ -17,8 +17,7 @@ class DutyCycleTracker:
         self.bands_airtime: Dict[str, BandAirtime] = {}
 
     def register_band(self, band_name: str, dc: DutyCycles):
-        hourly_limit = 3600 * (dc.value / 100.0)
-        band_airtime = BandAirtime(band_name, hourly_limit, dc)
+        band_airtime = BandAirtime(band_name, dc)
         self.bands_airtime[band_name] = band_airtime
 
     def validate_can_transmit(self, band_name: str, packet_time: float):
@@ -28,13 +27,13 @@ class DutyCycleTracker:
             registered_bands = tuple(self.bands_airtime.keys())
             raise UnkownBandError(band_name, registered_bands)
 
-        self._validate_airtime(packet_time, band_airtime)
+        self.__validate_airtime(packet_time, band_airtime)
 
-    def _validate_airtime(self, packet_time: float, band_airtime: BandAirtime) -> None:
+    def __validate_airtime(self, packet_time: float, band_airtime: BandAirtime) -> None:
         if not band_airtime.can_commit(packet_time):
             raise DutyCycleExceededError(
                 band_airtime.dc,
-                band_airtime.hourly_limit,
+                band_airtime.hourly_budget,
                 band_airtime.name,
             )
 

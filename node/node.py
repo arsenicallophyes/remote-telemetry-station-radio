@@ -3,17 +3,27 @@ Define object node
 """
 from uuid import UUID
 from functools import wraps
-from typing import Callable, Any
+from typing import Callable, Any, Optional, cast
 
 import board
 import busio
 import digitalio
-import adafruit_rfm9x
+from adafruit_rfm9x import RFM9x
+
+from node.mac.airtime import Airtime
+from node.mac.duty_cycle_tracker import DutyCycleTracker
 
 from models.packet import Packet
 from models.model import SpreadingFactor, CodingRate
 from models.packet_type import PacketType as pt
+from regulations.types.model import BandTuple
 
+
+# Adafruit RFM9X library does not support implicit
+# header mode, thus spreading factor 6 is not supported.
+# Spreading factor 6 requires an implicit header, as 
+# specified by the RFM95W Lora modem datasheet.
+IMPLICIT_HEADER_MODE = False
 
 def require_radio_initialized(method: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(method)
@@ -38,18 +48,13 @@ class Node:
         """
         self.name      = name
         self.node_id   = node_id
-        self.rfm9x     = None
-        self.__initialized_radio = False
-        self.apply_link_profile(
-            sf=7,
-            bw=125000,
-            cr=5,
-            tx_power_dbm=23,
-            crc=True,
-            preamble=8
-        )
 
-    def init_radio__(self, freq: int) -> None:
+        self.dc_tracker   = DutyCycleTracker()
+
+        self.__initialized_radio       = False
+        self.rfm9x: Optional[RFM9x]    = None
+
+    def init_radio__(self, freq: int, bands: BandTuple) -> None:
         """
         Initialize radio pins for Challenger RP2040 868 MHz
         
@@ -60,8 +65,11 @@ class Node:
         cs           = digitalio. DigitalInOut(board.GP9)
         reset        = digitalio.DigitalInOut(board.GP13)
         spi          = busio.SPI(board.GP10, MOSI=board.GP11, MISO=board.GP12)
-        self.rfm9x   = adafruit_rfm9x.RFM9x(spi, cs, reset, freq)
+        self.rfm9x   = RFM9x(spi, cs, reset, freq)
         self.__initialized_radio = True
+
+        for b in bands:
+            self.dc_tracker.register_band(b.name, b.duty_cycle)
 
     @require_radio_initialized
     def apply_link_profile(
@@ -93,9 +101,22 @@ class Node:
         return self.name
 
     @require_radio_initialized
-    def send(self, packet: Packet) -> None:        
-        # self.rfm9x.send()
-        print(packet)
+    def transmit(self, packet: Packet) -> None:
+        r = cast(RFM9x, self.rfm9x)
+        # Additional 4 bytes added by the RFM9x library due to explicit header mode
+        packet_bytes = len(packet.to_byte()) + 4
+        packet_time = Airtime.total_time(
+            r.signal_bandwidth,
+            r.spreading_factor,
+            r.preamble_length,
+            packet_bytes,
+            IMPLICIT_HEADER_MODE,
+            r.low_datarate_optimize,
+            r.coding_rate,
+            r.crc_error()
+        )
+        # self.dc_tracker.validate_can_transmit("",packet_time)
+
 
     @require_radio_initialized
     def receive(self) -> Packet:
