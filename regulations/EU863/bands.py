@@ -1,8 +1,17 @@
-from typing import Tuple
 from regulations.band import Band
 from regulations.duty_cycles import DutyCycles
 
-BANDS: Tuple[Band, ...] = (
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
+
+if TYPE_CHECKING:
+    from typing import Tuple
+
+
+
+BANDS: "Tuple[Band, ...]" = (
     Band(
         name="K",
         start=863.000,

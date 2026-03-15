@@ -1,22 +1,67 @@
-from typing import Tuple, Optional, List, TypeAlias, Sequence, NewType
 from math import exp
 from random import uniform
 from time import monotonic
-from node.mac.types.band_airtime import BandAirtime, UsedTime, WaitTime
 
-Weight = NewType("Weight", float)
-BandsUsedTime: TypeAlias = List[Tuple[BandAirtime, UsedTime, WaitTime]]
-BandsWeights: TypeAlias = List[Tuple[BandAirtime, Weight, WaitTime]]
+from node.mac.band_airtime import BandAirtime
+from node.mac.types.models import UsedTime, WaitTime
+
+from models.packet_type import PacketType, PacketCode
+
+
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
+
+if TYPE_CHECKING:
+    from typing import Tuple, Optional, List, TypeAlias, Sequence, NewType
+    Weight = NewType("Weight", float)
+    BandsUsedTime: TypeAlias = List[Tuple[BandAirtime, UsedTime, WaitTime]]
+    BandsWeights: TypeAlias = List[Tuple[BandAirtime, Weight, WaitTime]]
+else:
+    Weight = float
+    BandsUsedTime = "List[Tuple[BandAirtime, UsedTime, WaitTime]]"
+    BandsWeights = "List[Tuple[BandAirtime, Weight, WaitTime]]"
+
 class BandSelect:
 
     @staticmethod
-    def __bands_wait_time(
-        bands :Sequence[BandAirtime],
-        packet_time: float,
-        now: Optional[float] = None,
-        ) -> BandsUsedTime:
+    def select_band(
+            bands: "Sequence[BandAirtime]",
+            packet_time: float,
+            packet_type: "PacketCode",
+            time_scale: float,
+            formula_weights: Tuple[float, float],
+            temp: float,
+            min_control_reserve_ratio: float,
+            allow_wait_candidates: bool,
+            wait_horizon_sec: WaitTime,
+            now: "Optional[float]" = None,
+        ) -> Tuple[BandAirtime, WaitTime]:
+        if packet_type == PacketType.CONTROL:
+            return BandSelect.__control_packet_wait(bands, packet_time, now)
 
-        bands_wait: BandsUsedTime = []
+        return BandSelect.__data_packet_wait(
+            bands,
+            packet_time,
+            time_scale,
+            formula_weights,
+            temp,
+            min_control_reserve_ratio,
+            allow_wait_candidates,
+            wait_horizon_sec,
+            now
+        )
+
+    @staticmethod
+    def __bands_wait_time(
+            bands: "Sequence[BandAirtime]",
+            packet_time: float,
+            now: "Optional[float]" = None,
+        ) -> "BandsUsedTime":
+
+        bands_wait: "BandsUsedTime" = []
         for b in bands:
             used, wait = b.wait_until_legal(packet_time, now)
             bands_wait.append((b, used, wait))
@@ -24,16 +69,16 @@ class BandSelect:
         return bands_wait
 
     @staticmethod
-    def __earliest_available(bands_wait: BandsUsedTime) -> Tuple[BandAirtime, WaitTime]:
+    def __earliest_available(bands_wait: "BandsUsedTime") -> Tuple[BandAirtime, WaitTime]:
         band_airtime, _, wait = min(bands_wait, key= lambda x: x[2])
         return band_airtime, wait
 
     @staticmethod
     def __earliest_data_available(
-        bands_wait: BandsUsedTime,
-        packet_time: float,
-        min_control_reserve_ratio: float,
-        now: Optional[float]
+            bands_wait: "BandsUsedTime",
+            packet_time: float,
+            min_control_reserve_ratio: float,
+            now: "Optional[float]",
         ) -> Tuple[BandAirtime, WaitTime]:
 
         sorted_bands = sorted(bands_wait, key= lambda x: x[2])
@@ -46,10 +91,10 @@ class BandSelect:
         return sorted_bands[0][0], sorted_bands[0][2]
 
     @staticmethod
-    def control_packet_wait(
-        bands :Sequence[BandAirtime],
-        packet_time: float,
-        now: Optional[float] = None,
+    def __control_packet_wait(
+            bands: "Sequence[BandAirtime]",
+            packet_time: float,
+            now: "Optional[float]" = None,
         ) -> Tuple[BandAirtime, WaitTime]:
         now = monotonic() if now is None else now
         bands_wait = BandSelect.__bands_wait_time(bands, packet_time, now)
@@ -57,16 +102,16 @@ class BandSelect:
 
     
     @staticmethod
-    def data_packet_wait(
-        bands :Sequence[BandAirtime],
-        packet_time: float,
-        time_scale: float,
-        formula_weights: Tuple[float, float],
-        temp: float,
-        min_control_reserve_ratio: float,
-        allow_wait_candidates: bool,
-        wait_horizon_sec: WaitTime,
-        now: Optional[float] = None,
+    def __data_packet_wait(
+            bands: "Sequence[BandAirtime]",
+            packet_time: float,
+            time_scale: float,
+            formula_weights: Tuple[float, float],
+            temp: float,
+            min_control_reserve_ratio: float,
+            allow_wait_candidates: bool,
+            wait_horizon_sec: WaitTime,
+            now: "Optional[float]" = None,
     ) -> Tuple[BandAirtime, WaitTime]:
 
         if wait_horizon_sec < 0:
@@ -95,12 +140,17 @@ class BandSelect:
                 now,
             )
 
-        bands_score, weights_sum = BandSelect.__bands_weight(
+        bands_score = BandSelect.__score_bands(
             eligible_bands,
             packet_time,
             time_scale,
             formula_weights,
+        )
+
+        bands_weight, weights_sum = BandSelect.__bands_weights(
+            bands_score,
             temp,
+            eligible_bands
         )
 
         if weights_sum <= 0:
@@ -111,16 +161,16 @@ class BandSelect:
                 now,
             )
 
-        band, wait = BandSelect.__random_select(bands_score, weights_sum)
+        band, wait = BandSelect.__random_select(bands_weight, weights_sum)
 
         return band, wait
 
     @staticmethod
     def __filter_by_wait(
-        bands_wait: BandsUsedTime,
-        allow_wait_candidates: bool,
-        wait_horizon_sec: WaitTime
-        ) -> Optional[BandsUsedTime]:
+            bands_wait: "BandsUsedTime",
+            allow_wait_candidates: bool,
+            wait_horizon_sec: WaitTime
+        ) -> "Optional[BandsUsedTime]":
         zero_wait = [x for x in bands_wait if x[2] == 0]
         if zero_wait:
             if allow_wait_candidates:
@@ -130,18 +180,27 @@ class BandSelect:
 
     @staticmethod
     def __predict_control_headroom_at_send(
-        bands_wait: BandsUsedTime,
-        allow_wait_candidates: bool,
-        wait_horizon_sec: WaitTime,
-        packet_time: float,
-        min_control_reserve_ratio: float,
-        now: Optional[float],
-        ) -> Optional[BandsUsedTime]:
-        filterd_bands = BandSelect.__filter_by_wait(bands_wait, allow_wait_candidates, wait_horizon_sec)
+            bands_wait: "BandsUsedTime",
+            allow_wait_candidates: bool,
+            wait_horizon_sec: WaitTime,
+            packet_time: float,
+            min_control_reserve_ratio: float,
+            now: "Optional[float]",
+        ) -> "Optional[BandsUsedTime]":
+
+        filterd_bands = BandSelect.__filter_by_wait(
+            bands_wait,
+            allow_wait_candidates,
+            wait_horizon_sec,
+        )
+
         if filterd_bands is None or len(filterd_bands) == 0:
             return None
-        eligible_bands: BandsUsedTime = []
+
+        eligible_bands: "BandsUsedTime" = []
+
         for b, used, wait in filterd_bands:
+
             band = BandSelect.__filter_band(
                 b,
                 used,
@@ -150,6 +209,7 @@ class BandSelect:
                 min_control_reserve_ratio,
                 now,
             )
+
             if band is not None:
                 eligible_bands.append(band)
 
@@ -157,13 +217,13 @@ class BandSelect:
 
     @staticmethod
     def __filter_band(
-        band_airtime: BandAirtime,
-        used: UsedTime,
-        wait: WaitTime,
-        packet_time: float,
-        min_control_reserve_ratio: float,
-        now: Optional[float],
-        ) -> Optional[Tuple[BandAirtime, UsedTime, WaitTime]]:
+            band_airtime: BandAirtime,
+            used: UsedTime,
+            wait: WaitTime,
+            packet_time: float,
+            min_control_reserve_ratio: float,
+            now: "Optional[float]",
+        ) -> "Optional[Tuple[BandAirtime, UsedTime, WaitTime]]":
 
         if wait != 0:
             used = band_airtime.used_at(wait, now)
@@ -181,11 +241,12 @@ class BandSelect:
 
     @staticmethod
     def __reserve_control_budget(
-        band_airtime: BandAirtime,
-        used: UsedTime,
-        packet_time: float,
-        min_control_reserve_ratio: float,
-    ):
+            band_airtime: BandAirtime,
+            used: UsedTime,
+            packet_time: float,
+            min_control_reserve_ratio: float,
+        ) -> bool:
+
         B = band_airtime.hourly_budget # Hourly budget
         K = B - used                   # Budget remaining
         R = (K - packet_time) / B      # Remaining-after budget ratio
@@ -196,11 +257,11 @@ class BandSelect:
 
     @staticmethod
     def __random_select(
-        bands_score: BandsWeights,
-        weights_sum: float
+            bands_score: "BandsWeights",
+            weights_sum: float,
         ) -> Tuple[BandAirtime, WaitTime]:
-        r = uniform(0, weights_sum)
 
+        r = uniform(0, weights_sum)
         cumulative: float = 0.0
 
         for b, w, wait in bands_score:
@@ -212,22 +273,19 @@ class BandSelect:
         return band_airtime, wait
 
     @staticmethod
-    def __bands_weight(
-        eligible_bands :BandsUsedTime,
-        packet_time: float,
-        time_scale: float,
-        formula_weights: Tuple[float, float],
-        temp: float,
-        ) -> Tuple[BandsWeights, float]:
+    def __score_bands(
+            eligible_bands :"BandsUsedTime",
+            packet_time: float,
+            time_scale: float,
+            formula_weights: Tuple[float, float],
+        ) -> List[float]:
 
         w1, w2 = formula_weights
-        bands_score: BandsWeights = []
         scores: List[float] = []
 
         for b, used, wait in eligible_bands:
-            B = b.hourly_budget              # Hourly budget
-            U = (used + packet_time) / B     # Future utilization ratio
-            T = wait / time_scale            # Time wait penalty
+            U = (used + packet_time) / b.hourly_budget # Future utilization ratio
+            T = wait / time_scale                      # Time wait penalty
 
             score = (
               - w1 * U # Avoid hotspots
@@ -235,16 +293,27 @@ class BandSelect:
             )
             scores.append(score)
 
-        # Subtract max score to prevent computing large numbers on embedded devices
-        # Probability remains constant
+        return scores
+    
+    @staticmethod
+    def __bands_weights(
+            scores: List[float],
+            temp: float,
+            eligible_bands: "BandsUsedTime",
+        ) -> Tuple["BandsWeights", float]:
+
+        bands_weight: "BandsWeights" = []
         m = max(scores)
         weights_sum = 0
+
+        # Subtract max score to prevent computing large numbers on embedded devices
+        # Probability remains constant
 
         for i, score in enumerate(scores):
             w = exp((score - m) / temp)
             weights_sum += w
             band = eligible_bands[i][0]
             wait = eligible_bands[i][2]
-            bands_score.append((band, Weight(w), wait))
+            bands_weight.append((band, Weight(w), wait))
 
-        return bands_score, weights_sum 
+        return bands_weight, weights_sum

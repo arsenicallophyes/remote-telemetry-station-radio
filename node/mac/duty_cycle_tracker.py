@@ -1,22 +1,28 @@
 """
 Define Duty Cycle Tracker class
 """
-from typing import Dict
+from node.mac.band_airtime import BandAirtime
 
-from node.mac.types.band_airtime import BandAirtime
-
-from regulations.duty_cycles import DutyCycles
+from regulations.duty_cycles import DutyCyclesType
 from exceptions.regulations.unknown_band_error import UnkownBandError
 from exceptions.regulations.duty_cycle_exceeded_error import DutyCycleExceededError
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
+
+if TYPE_CHECKING:
+    from typing import Dict, Sequence
+
 
 class DutyCycleTracker:
     """
     Duty Cycle class to keep track of air time used to transmit data frames per sub band, per hour.
     """
     def __init__(self) -> None:
-        self.bands_airtime: Dict[str, BandAirtime] = {}
+        self.bands_airtime: "Dict[str, BandAirtime]" = {}
 
-    def register_band(self, band_name: str, dc: DutyCycles):
+    def register_band(self, band_name: str, dc: DutyCyclesType):
         band_airtime = BandAirtime(band_name, dc)
         self.bands_airtime[band_name] = band_airtime
 
@@ -39,3 +45,6 @@ class DutyCycleTracker:
 
     def commit_airtime(self, band_name: str, packet_time: float) -> None:
         self.bands_airtime[band_name].commit(packet_time)
+
+    def get_registered_bands(self) -> "Sequence[BandAirtime]":
+        return tuple(self.bands_airtime.values())

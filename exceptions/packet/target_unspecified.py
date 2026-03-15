@@ -2,19 +2,28 @@
 Define custom error for exceeding permitted power usage.
 """
 from exceptions.packet.packet_error import PacketError
-from models.packet import Packet
+from models.packet import PacketCode
+
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
+
+if TYPE_CHECKING:
+    from typing import Optional
 
 class TargetUnspecifiedError(PacketError):
     """
     Raised when the target node is not specified.
     """
-    def __init__(self, packet: Packet) -> None:
+    def __init__(self, source: int, p_type: PacketCode, message: "Optional[str]") -> None:
         message = (
-            f"Source {packet.source.node_id} has not specified the target node. "
-            f"Attempted to send a packet of type {packet.type}, with message of "
-            f"'{packet.message}'"
+            f"Source {source} has not specified the target node. "
+            f"Attempted to send a packet of type {p_type}, with message of "
+            f"'{message}'"
         )
         super().__init__(message, code=201)
-        self.source = packet.source
-        self.type = packet.type
-        self.message = packet.message
+        self.source  = source
+        self.type    = p_type
+        self.message = message

@@ -5,7 +5,7 @@ from models.model import SpreadingFactor, CodingRate
 class Airtime:
 
     @staticmethod
-    def _symbol_time(bandwidth: float, sf: SpreadingFactor) -> float:
+    def _symbol_time(bandwidth: float, sf: "SpreadingFactor") -> float:
         return (2 ** sf) / bandwidth
 
     @staticmethod
@@ -17,7 +17,7 @@ class Airtime:
         return 8 * pl_bytes
 
     @staticmethod
-    def _sf_term(sf: SpreadingFactor) -> int:
+    def _sf_term(sf: "SpreadingFactor") -> int:
         return 4 * sf
 
     @staticmethod
@@ -29,11 +29,11 @@ class Airtime:
         return 20 * ih
 
     @staticmethod
-    def _payload_denominator(sf: SpreadingFactor, de: bool) -> int:
+    def _payload_denominator(sf: "SpreadingFactor", de: bool) -> int:
         return 4 * (sf - 2 * de)
 
     @staticmethod
-    def _payload_numerator(pl_bytes: int, sf: SpreadingFactor, crc: bool, ih: bool) -> int:
+    def _payload_numerator(pl_bytes: int, sf: "SpreadingFactor", crc: bool, ih: bool) -> int:
 
         return (
             Airtime._payload_bits_term(pl_bytes) -
@@ -50,10 +50,10 @@ class Airtime:
     @staticmethod
     def _payload_symbols(
         pl_bytes: int,
-        sf: SpreadingFactor,
+        sf: "SpreadingFactor",
         ih: bool,
         de: bool,
-        cr: CodingRate,
+        cr: "CodingRate",
         crc: bool,
     ) -> int:
         """
@@ -62,13 +62,13 @@ class Airtime:
         :param pl_bytes: Payload length in bytes.
         :type pl_bytes: int
         :param sf: Spreading factor
-        :type sf: SpreadingFactor
+        :type sf: "SpreadingFactor"
         :param ih: True => implicit header mode (IH=1), False => explicit (IH=0).
         :type ih: bool
         :param de: Low data rate optimization enabled (DE=1)
         :type de: bool
         :param cr: Coding rate, 1 for 4/5 ... 4 for 4/8
-        :type cr: CodingRate
+        :type cr: "CodingRate"
         :param crc: True => CRC enabled.
         :type crc: bool
         :return: Number of payload symbols.
@@ -88,12 +88,12 @@ class Airtime:
     @staticmethod
     def total_time(
         bandwidth: float,
-        sf: SpreadingFactor,
+        sf: "SpreadingFactor",
         n_preamble: int,
         pl_bytes: int,
         ih: bool,
         de: bool,
-        cr: CodingRate,
+        cr: "CodingRate",
         crc: bool
     ) -> float:
 

@@ -1,13 +1,23 @@
 """
 Define packet types via code
 """
-from enum import Enum
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
 
-class PacketType(int, Enum):
+if TYPE_CHECKING:
+    from typing import Literal
+    PacketCode = Literal[0, 1, 2, 3]
+else:
+    PacketCode = int
+
+
+class PacketType:
     """
     Define a set of codes used to indicate the packet type.
     """
-    CONTROL     = 0
-    ACK         = 1
-    DATA        = 2
-    CONFIRMABLE = 3
+    CONTROL    : "PacketCode" = 0
+    ACK        : "PacketCode" = 1
+    DATA       : "PacketCode" = 2
+    CONFIRMABLE: "PacketCode" = 3

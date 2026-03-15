@@ -1,15 +1,21 @@
 """
 Define custom error for unregistred bands.
 """
-from typing import Tuple
-
 from exceptions.regulations.regulation_error import RegulationError
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
+
+if TYPE_CHECKING:
+    from typing import Tuple
 
 class UnkownBandError(RegulationError):
     """
     Raised when the band provided is not registered.
     """
-    def __init__(self, band_name: str, registered_bands: Tuple[str, ...]) -> None:
+    def __init__(self, band_name: str, registered_bands: "Tuple[str, ...]") -> None:
         message = (
             f"Band '{band_name}' is not registered within the following list: "
             f"{registered_bands}. Verify the band is registered."

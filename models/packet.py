@@ -1,23 +1,42 @@
 """
 Define Packet dataclass
 """
-from typing import Optional
-from dataclasses import dataclass
+from models.packet_type import PacketType, PacketCode
+from exceptions.packet.target_unspecified import TargetUnspecifiedError
+from exceptions.packet.message_unspecified_error import MessageUnspecifiedError
 
-from models.packet_type import PacketType
-from node.node          import Node
+try:
+    from typing import TYPE_CHECKING
+except ImportError:
+    TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
 
-@dataclass
+if TYPE_CHECKING:
+    from typing import Optional
+
+
 class Packet:
     """
     Define packet structure and methods
     """
-    source: Node
-    target: Optional[Node]
-    type: PacketType
-    message: Optional[str]
+    __slots__ = ("source", "target", "p_type", "message")
 
-    def validate_packet(self) -> bool:
+    source: int
+    target: "Optional[int]"
+    p_type: "PacketCode"
+    message: "Optional[str]"
+
+    def __init__(self,
+            source: int,
+            target: "Optional[int]",
+            p_type: "PacketCode",
+            message: "Optional[str]",
+        ) -> None:
+        self.source = source
+        self.target = target
+        self.p_type = p_type
+        self.message = message
+
+    def validate_packet(self) -> None:
         """
         Checks if the packet has a target node set, 
         throws TargetUnspecifiedError if not present.
@@ -31,21 +50,20 @@ class Packet:
         :rtype: bool
         """
         if self.target is None:
-            return False
-        
-        if self.type == 2 and self.message is None:
-            return False
-        
-        return True
+            raise TargetUnspecifiedError(self.source, self.p_type, self.message)
+
+        if self.p_type == PacketType.DATA and self.message is None:
+            raise MessageUnspecifiedError(self.source, self.p_type, self.target)
 
     def to_byte(self) -> bytearray:
         """
-        Returns bytearray of all parameters concatenated by a colon.
-        Format -> source:target:type:message
+        Returns bytearray of the parameter message.
+        Format -> b'self.message'
         
         :param self: Packet instance
-        :return: Returns bytearray of the packet.
+        :return: Returns bytearray of the message.
         :rtype: bytearray
         """
-        msg = f"{self.source}:{self.target}:{self.type}:{self.message}"
+        self.validate_packet()
+        msg = "" if self.message is None else self.message
         return bytearray(msg, "utf-8")
