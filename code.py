@@ -2,15 +2,34 @@ from node.node import Node
 from regulations.EU863.bands import BANDS
 from models.packet import Packet
 from models.packet_type import PacketType
+from models.model import NodeID
 from time import sleep
+import random
 
-source = 0
-node = Node("Base", source, 863, BANDS)
+words = ("Testing", "Infinite Chickens", "no", "Cows go moo", "LoRa sounds like a nice project, right? right??", "Behind you!")
 
-packet = Packet(
-    source, 1, PacketType.DATA, "Hello World."
-)
+TRANSMIT = False
+RECEIVE = False
+if TRANSMIT:
+    source = 0
+    target = 1
+    node = Node("Base", source, 869.8, BANDS)
 
-while True:
-    node.transmit(packet)
-    sleep(2)
+    node.peer_table.add_peer(NodeID(target))
+    packet = Packet(
+        source, NodeID(target), PacketType.DATA, 0, "Hello World."
+    )
+
+    while True:
+        node.data_transmit(packet)
+        index = random.randint(0, len(words) -1)
+        packet.message = words[index]
+        sleep(2)
+
+if RECEIVE:
+    source = 1
+    target = 0
+    node = Node("A", source, 869.8, BANDS)
+    node.peer_table.add_peer(NodeID(target))
+    while True:
+        node.data_receive()

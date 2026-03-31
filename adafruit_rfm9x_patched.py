@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from typing import TypeAlias, Union, Any, Literal, Optional, Type
     import array
 
-import random
 import time
 from busio import SPI
 from digitalio import DigitalInOut
@@ -133,14 +132,7 @@ _RH_BROADCAST_ADDRESS = const(0xFF)
 # The acknowledgement bit in the FLAGS
 # The top 4 bits of the flags are reserved for RadioHead. The lower 4 bits are reserved
 # for application layer use.
-_RH_FLAGS_ACK = const(0x80)
-_RH_FLAGS_RETRY = const(0x40)
 
-# application-level flags (lower 4 bits only)
-APP_ACK_REQ   = const(0x01)  # request ACK
-APP_ROUTED    = const(0x02)  # forwarded packet
-APP_CONTROL   = const(0x04)  # control / management
-# 0x08 still free
 
 # User facing constants:
 SLEEP_MODE = 0b000
@@ -275,7 +267,7 @@ class RFM9x:
         spi: SPI,
         cs: DigitalInOut,
         reset: DigitalInOut,
-        frequency: int,
+        frequency: float,
         *,
         preamble_length: int = 8,
         high_power: bool = True,
@@ -489,6 +481,7 @@ class RFM9x:
     def frequency_mhz(self, val: float) -> None:
         if val < 240 or val > 960:
             raise RuntimeError("frequency_mhz must be between 240 and 960")
+        self.idle()
         # Calculate FRF register 24-bit value.
         frf = int((val * 1000000.0) / _RH_RF95_FSTEP) & 0xFFFFFF
         # Extract byte values and update registers.
@@ -762,43 +755,6 @@ class RFM9x:
         self._write_u8(_RH_RF95_REG_12_IRQ_FLAGS, 0xFF)
         return not timed_out
 
-    def send_with_ack(self, data: ReadableBuffer) -> bool:
-        """Reliable Datagram mode:
-        Send a packet with data and wait for an ACK response.
-        The packet header is automatically generated.
-        If enabled, the packet transmission will be retried on failure
-        """
-        if self.ack_retries:
-            retries_remaining = self.ack_retries
-        else:
-            retries_remaining = 1
-        got_ack = False
-        self.sequence_number = (self.sequence_number + 1) & 0xFF
-        while not got_ack and retries_remaining:
-            self.identifier = self.sequence_number
-            self.send(data, keep_listening=True)
-            # Don't look for ACK from Broadcast message
-            if self.destination == _RH_BROADCAST_ADDRESS:
-                got_ack = True
-            else:
-                # wait for a packet from our destination
-                ack_packet = self.receive(timeout=self.ack_wait, with_header=True)
-                if ack_packet is not None:
-                    if ack_packet[3] & _RH_FLAGS_ACK:
-                        # check the ID
-                        if ack_packet[2] == self.identifier:
-                            got_ack = True
-                            break
-            # pause before next retry -- random delay
-            if not got_ack:
-                # delay by random amount before next try
-                time.sleep(self.ack_wait + self.ack_wait * random.random())
-            retries_remaining = retries_remaining - 1
-            # set retry flag in packet header
-            self.flags |= _RH_FLAGS_RETRY
-        self.flags = 0  # clear flags
-        return got_ack
-
     def receive(
         self,
         *,
@@ -878,35 +834,11 @@ class RFM9x:
                 # packet will never be None. Done for type checking
                 if packet is None:
                     return
-                app_flags = packet[3] & 0x0F
-                rh_flags  = packet[3] & 0xF0
                 if self.node != _RH_BROADCAST_ADDRESS and packet[0] not in {
                     _RH_BROADCAST_ADDRESS,
                     self.node,
                 }:
                     packet = None
-                # send ACK unless this was an ACK or a broadcast
-                elif (
-                    (app_flags & APP_ACK_REQ)
-                    and not(rh_flags & _RH_FLAGS_ACK)
-                    and (packet[0] != _RH_BROADCAST_ADDRESS)
-                ):
-                    # delay before sending Ack to give receiver a chance to get ready
-                    if self.ack_delay is not None:
-                        time.sleep(self.ack_delay)
-                    # send ACK packet to sender (data is b'!')
-                    self.send(
-                        b"!",
-                        destination=packet[1],
-                        node=packet[0],
-                        identifier=packet[2],
-                        flags=(packet[3] | _RH_FLAGS_ACK),
-                    )
-                    # reject Retries if we have seen this idetifier from this source before
-                    if (self.seen_ids[packet[1]] == packet[2]) and (packet[3] & _RH_FLAGS_RETRY):
-                        packet = None
-                    else:  # save the packet identifier for this source
-                        self.seen_ids[packet[1]] = packet[2]
                 if not with_header and packet is not None:  # skip the header if not wanted
                     packet = packet[4:]
         # Listen again if necessary and return the result packet.

@@ -2,6 +2,7 @@
 Define Packet dataclass
 """
 from models.packet_type import PacketType, PacketCode
+from models.model import NodeID
 from exceptions.packet.target_unspecified import TargetUnspecifiedError
 from exceptions.packet.message_unspecified_error import MessageUnspecifiedError
 
@@ -16,25 +17,35 @@ if TYPE_CHECKING:
 
 class Packet:
     """
+    @dataclass
     Define packet structure and methods
     """
-    __slots__ = ("source", "target", "p_type", "message")
+    __slots__ = (
+        "source",
+        "target",
+        "p_type",
+        "identifier",
+        "message",
+        )
 
     source: int
-    target: "Optional[int]"
+    target: "Optional[NodeID]"
     p_type: "PacketCode"
     message: "Optional[str]"
 
-    def __init__(self,
+    def __init__(
+            self,
             source: int,
-            target: "Optional[int]",
+            target: "Optional[NodeID]",
             p_type: "PacketCode",
+            identifier: int,
             message: "Optional[str]",
         ) -> None:
-        self.source = source
-        self.target = target
-        self.p_type = p_type
-        self.message = message
+        self.source       = source
+        self.target       = target
+        self.p_type       = p_type
+        self.identifier   = identifier
+        self.message      = message
 
     def validate_packet(self) -> None:
         """

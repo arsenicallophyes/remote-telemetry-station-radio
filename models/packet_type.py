@@ -8,7 +8,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from typing import Literal
-    PacketCode = Literal[0, 1, 2, 3]
+    PacketCode = Literal[0, 1, 2, 3, 4]
 else:
     PacketCode = int
 
@@ -17,7 +17,8 @@ class PacketType:
     """
     Define a set of codes used to indicate the packet type.
     """
-    CONTROL    : "PacketCode" = 0
-    ACK        : "PacketCode" = 1
-    DATA       : "PacketCode" = 2
-    CONFIRMABLE: "PacketCode" = 3
+    CONTROL     : "PacketCode" = 0
+    ACK         : "PacketCode" = 1
+    DATA        : "PacketCode" = 2
+    CONFIRMABLE : "PacketCode" = 3
+    NACK        : "PacketCode" = 4

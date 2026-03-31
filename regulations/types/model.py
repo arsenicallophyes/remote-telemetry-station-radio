@@ -11,8 +11,3 @@ if TYPE_CHECKING:
     BandsSeq: TypeAlias = Sequence[Band]
 else:
     BandsSeq = "Sequence[Band]"
-
-
-
-
-

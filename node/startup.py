@@ -4,7 +4,7 @@ Define node startup behavior
 from node.node import Node
 
 from models.packet import Packet
-from models.packet_type import PacketType as pt
+# from models.packet_type import PacketType as pt
 
 class Startup:
     """
@@ -17,12 +17,13 @@ class Startup:
         """
         Return broadcast packet
         """
-        return Packet(1, None, pt.CONTROL, None)
+        raise NotImplementedError
+        # return Packet(1, None, pt.CONTROL, None)
 
     def broadcast(self) -> None:
-        packet = self.create_broadcast_packet()
-        self.node.transmit(packet)
-    
+        pass
+        # packet = self.create_broadcast_packet()
+        # self.node.transmit(packet)
 
 if __name__ == "__main__":
     pass

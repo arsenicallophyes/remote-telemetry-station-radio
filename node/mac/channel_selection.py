@@ -44,13 +44,13 @@ CHANNELS = {
 class ChannelSelect:
 
     def __init__(self, bandwidth: float) -> None:
-        if bandwidth != 125.0:
+        if bandwidth != 125_000:
             raise NotImplementedError(
                 "Only a bandwidth of 125kHz is supported. "
                 f"Provided {bandwidth=}"
             )
         self.bandwidth = bandwidth
-        self.space = 200.0
+        self.space = 200_000
 
     def select_channel(self, band_name: str) -> Frequency:
         """
