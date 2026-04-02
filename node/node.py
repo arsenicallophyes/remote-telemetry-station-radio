@@ -27,8 +27,8 @@ from node.mac.channel_selection import ChannelSelect
 
 
 from models.packet import Packet
-from models.model import SpreadingFactor, CodingRate, NodeID
-from models.packet_type import PacketType
+from models.model import SpreadingFactor, CodingRate, NodeID, Message, Identifier
+from models.packet_type import PacketKind, PacketKindType
 
 from regulations.types.model import BandsSeq
 from regulations.EU863.bands import BANDS
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 IMPLICIT_HEADER_MODE = False
 ACK_MESSAGE = 1
 NACK_IGNORE = "IGNORE"
+ETX_MESSAGE = 0
 class Node:
     """
     Node class
@@ -62,13 +63,15 @@ class Node:
 
     control_band = BANDS[5] # Band P
     control_transmition_retries = 5
-    control_frequency = 869.8 # Must be 
+    control_frequency = 869.8 # Must be
 
     ack_wait = 0.5
 
     bandwidth = 125_000
     spreading_factor: "SpreadingFactor" = 7
     coding_rate: "CodingRate" = 5
+
+    etx_packets_count = 20
 
     def __init__(self, name: str, node_id: int, freq: float, bands: BandsSeq) -> None:
         """
@@ -143,7 +146,7 @@ class Node:
     def __str__(self) -> str:
         return self.name
 
-    def control_transmit_nack(self, packet: Packet, peer: Peer, now: "Optional[float]" = None) -> "Optional[Set[int]]":
+    def _control_transmit_nack(self, packet: Packet, peer: Peer, now: "Optional[float]" = None) -> "Optional[Set[int]]":
         now = monotonic() if now is None else now
         r = self.rfm9x
 
@@ -173,13 +176,12 @@ class Node:
             if packet_bytes is None:
                 sleep(self.ack_wait + self.ack_wait * random.random())
                 continue
+            
+            message, _, _, packet_kind = self.decode_packet(packet_bytes)
+            message = str(message)
 
-            headers = packet_bytes[:4]
-            message = packet_bytes[4:].decode("utf-8")
-
-            packet_type = int(headers[3])
-            if packet_type != PacketType.ACK:
-                print("Ignoring packet", f"{headers=}:{message=}")
+            if packet_kind != PacketKind.ACK:
+                print("Ignoring packet", f"{message=}")
                 continue
 
             if message == NACK_IGNORE:
@@ -190,10 +192,9 @@ class Node:
                 except ValueError:
                     continue
 
-            print(f"Ack Received {headers=}:{message=}")
+            print(f"Ack Received {message=}")
             peer.transmit.increment_sequence()
             return queued_packets
-    
 
     def control_transmit_ack(self, packet: Packet, peer: Peer, now: "Optional[float]" = None) -> "Optional[Literal[1]]":
         now = monotonic() if now is None else now
@@ -226,24 +227,22 @@ class Node:
                 sleep(self.ack_wait + self.ack_wait * random.random())
                 continue
 
-            headers = packet_bytes[:4]
-            message = packet_bytes[4:].decode("utf-8")
+            message, _, _, packet_kind = self.decode_packet(packet_bytes)
+            message = str(message)
+
+            if packet_kind != PacketKind.ACK:
+                print("Ignoring packet", f"{message=}")
+                continue
 
             if not message.isdecimal():
                 continue
-
             message = int(message)
-
-            packet_type = int(headers[3])
-            if packet_type != PacketType.ACK:
-                print("Ignoring packet", f"{headers=}:{message=}")
-                continue
-
+            
             if message != ACK_MESSAGE:
-                print("Wrong message", f"{headers=}:{message=}")
+                print("Wrong message", f"{message=}")
                 continue
 
-            print(f"Ack Received {headers=}:{message=}")
+            print(f"Ack Received {message=}")
             peer.transmit.increment_sequence()
             return message
 
@@ -296,7 +295,7 @@ class Node:
         control_packet = Packet(
             self.node_id,
             packet.target,
-            PacketType.CONTROL,
+            PacketKind.CONTROL,
             peer.transmit.next_seq,
             f"DT:{frequency}:PT:{packet_time}"
         )
@@ -350,33 +349,28 @@ class Node:
                 print("Failed to get control packet")
                 continue
 
-            headers = packet_bytes[:4]
-            message = packet_bytes[4:].decode("utf-8")
+            message, source, _, packet_kind = self.decode_packet(packet_bytes)
+            message = str(message)
 
-            packet_type = int(headers[3])
-            if packet_type != PacketType.CONTROL:
+            if packet_kind != PacketKind.CONTROL:
                 continue
 
-            source = NodeID(headers[1])
             peer = self.peer_table.get_peer(source)
 
             if not peer:
-                print(f"Unregistered peer: {source=}: {headers=}: {message}")
+                print(f"Unregistered peer: {source=}: {message}")
                 continue
-
+            
             parameters: "Dict[str, float]" = {}
             args: "List[str]" = message.split(":")
 
             if len(args) % 2 != 0:
-                print(f"Invalid paramters format: {headers=}, {message=}")
+                print(f"Invalid paramters format: {message=}")
                 continue
 
             try:
                 for i in range(0, len(args), 2):
                     parameters[args[i]] = float(args[i+1])
-
-                frequency = parameters["DT"]
-                packet_time = parameters["PT"]
             except IndexError:
                 print(f"Index Error: {message=}")
                 continue
@@ -384,18 +378,31 @@ class Node:
                 print(f"Key Error: {message=}")
                 continue
 
+            if not parameters:
+                continue
+
+            frequency   = parameters.get("DT")
+            packet_time = parameters.get("PT")
+            etx_count   = parameters.get("ET")
+
+            if not etx_count or not (frequency and packet_time):
+                continue
+
             r.send(
                 b"1",
                 destination=source,
                 node=self.node_id,
                 identifier=peer.transmit.next_seq,
-                flags=PacketType.ACK
+                flags=PacketKind.ACK
             )
             peer.transmit.increment_sequence()
             sleep(0.15)
-            r.frequency_mhz = frequency
-            r.listen()
-            return packet_time
+            if frequency and packet_time:
+                r.frequency_mhz = frequency
+                r.listen()
+                return packet_time
+            elif etx_count:
+                return etx_count
 
     def data_receive(
             self,
@@ -416,17 +423,12 @@ class Node:
             if packet_bytes is None:
                 return
 
-            headers = packet_bytes[:4]
-            message = packet_bytes[4:].decode("utf-8")
-
-            source = NodeID(headers[1])
-            identifier = int(headers[2])
-            packet_type = int(headers[3])
-
+            message, source, identifier, packet_kind = self.decode_packet(packet_bytes)
+            
             if recovery_source and recovery_source != source:
                 return
 
-            if packet_type != PacketType.DATA:
+            if packet_kind != PacketKind.DATA:
                 return
 
             timestamp = self.extract_timestamp(message)
@@ -459,7 +461,7 @@ class Node:
 
             if response == SequenceResponse.SUCCESS:
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {headers=}:{message=}:{timestamp=}")
+                print(f"Saving -> {message=}:{timestamp=}")
 
             if response == SequenceResponse.AHEAD:
                 nack_response = self.control_send_NACK(source, now)
@@ -470,9 +472,9 @@ class Node:
                     else:
                         self.recovery = RecoveryState(source, nack_response, identifier)
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {headers=}:{message=}:{timestamp=}")
+                print(f"Saving -> {message=}:{timestamp=}")
 
-            print(f"{headers=}:{message=}")
+            print(f"{message=}")
             return message
         finally:
             r.frequency_mhz = self.control_frequency
@@ -498,13 +500,13 @@ class Node:
         packet = Packet(
             self.node_id,
             source,
-            PacketType.NACK,
+            PacketKind.NACK,
             peer.transmit.next_seq,
             message,
         )
 
         peer.receive.missed_packets = None
-        queued_packets = self.control_transmit_nack(packet, peer, now)
+        queued_packets = self._control_transmit_nack(packet, peer, now)
 
         return queued_packets
 
@@ -551,12 +553,9 @@ class Node:
         if packet_bytes is None:
             return
 
-        headers = packet_bytes[:4]
-        message = packet_bytes[4:].decode("utf-8")
+        message, source, identifier, packet_kind = self.decode_packet(packet_bytes)
+        message = str(message)
 
-        source = NodeID(headers[1])
-        identifier = int(headers[2])
-        packet_type = int(headers[3])
 
         peer = self.peer_table.get_peer(expected_source)
         if not peer:
@@ -566,7 +565,7 @@ class Node:
             print("Send busy message if registered")
             return
 
-        if packet_type != PacketType.NACK:
+        if packet_kind != PacketKind.NACK:
             return
 
         response = self.peer_table.handle_sequence(source, identifier)
@@ -583,7 +582,7 @@ class Node:
         queued_packets_identifiers: "List[int]" = []
         for i in missed_packets:
             packet = self.persistence_manager.retrieve_packet(i)
-            if packet and packet.p_type == PacketType.DATA:
+            if packet and packet.p_type == PacketKind.DATA:
                 queued_packets.add(packet)
                 queued_packets_identifiers.append(packet.identifier)
 
@@ -595,7 +594,7 @@ class Node:
         NACK_ACK_packet = Packet(
             self.node_id,
             expected_source,
-            PacketType.ACK,
+            PacketKind.ACK,
             peer.transmit.next_seq,
             message,
         )
@@ -616,9 +615,9 @@ class Node:
         peer.receive.link_quality = float(r.last_rssi)
         peer.receive.last_seq = identifier
 
-    def extract_timestamp(self, message: str) -> "Optional[struct_time]":
+    def extract_timestamp(self, message: Message) -> "Optional[struct_time]":
         stamp  = message.split("_", 1)[0]
-        parts = stamp .split(":")
+        parts = stamp.split(":")
         if len(parts) != 6:
             return
 
@@ -628,3 +627,107 @@ class Node:
             return None
 
         return struct_time((y, mo, d, h, mi, s, 0, 0, -1))
+
+    def etx_transmit(self, target: "NodeID", now: "Optional[float]" = None) -> "Optional[int]":
+        now = monotonic() if now is None else now
+        r = self.rfm9x
+
+        self.apply_link_profile(
+            self.spreading_factor,
+            self.bandwidth,
+            self.coding_rate,
+            self.control_band.erp,
+            True,
+        )
+
+        r.frequency_mhz = self.control_frequency
+
+        packet = Packet(self.node_id, target, PacketKind.CONTROL, 0, str(ETX_MESSAGE))
+        for i in range(self.etx_packets_count):
+            r.send(
+                packet.to_byte(),
+                destination=packet.target,
+                node=packet.source,
+                identifier=i,
+                flags=packet.p_type
+            )
+            sleep(0.25)
+
+        received_packets = self.control_receive(listen_window=self.wait_horizon_sec)
+
+        if not received_packets:
+            return
+
+        return int(received_packets)
+
+    def etx_receive(
+            self,
+            expected_source: "NodeID",
+            listen_window: "Optional[float]",
+            now: "Optional[float]" = None,
+        ) -> "Optional[int]":
+        now = monotonic() if now is None else now
+        r = self.rfm9x
+
+        self.apply_link_profile(
+            self.spreading_factor,
+            self.bandwidth,
+            self.coding_rate,
+            self.control_band.erp,
+            True,
+        )
+
+        r.frequency_mhz = self.control_frequency
+
+        peer = self.peer_table.get_peer(expected_source)
+
+        if not peer:
+            return
+
+        n = 0
+        last_received = None
+        deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
+
+        while n < self.etx_packets_count and monotonic() < deadline:
+            packet_bytes = r.receive(with_header=True)
+
+            if not packet_bytes:
+                continue
+
+            message, source, identifier, packet_kind = self.decode_packet(packet_bytes)
+
+            if source != expected_source:
+                continue
+
+            if packet_kind != PacketKind.CONTROL:
+                continue
+
+            if message != str(ETX_MESSAGE):
+                continue
+
+            n += 1
+            last_received = identifier
+            if last_received >= self.etx_packets_count:
+                break
+
+        packet = Packet(self.node_id, expected_source, PacketKind.CONTROL, 0, f"ET:{n}")
+
+        response = self.control_transmit_ack(packet, peer, now)
+
+        if not response:
+            return
+
+        return n
+
+    def decode_packet(
+            self,
+            packet_bytes: bytearray,
+        ) -> "Tuple[Message, NodeID, Identifier, PacketKindType]":
+        headers = packet_bytes[:4]
+        message = Message(packet_bytes[4:].decode("utf-8"))
+
+        source = NodeID(headers[1])
+        identifier = Identifier(headers[2])
+        packet_kind = PacketKindType(headers[3])
+
+        return message, source, identifier, packet_kind

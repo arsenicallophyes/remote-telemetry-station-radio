@@ -1,7 +1,7 @@
 """
 Define Packet dataclass
 """
-from models.packet_type import PacketType, PacketCode
+from models.packet_type import PacketKind, PacketKindType
 from models.model import NodeID
 from exceptions.packet.target_unspecified import TargetUnspecifiedError
 from exceptions.packet.message_unspecified_error import MessageUnspecifiedError
@@ -30,14 +30,14 @@ class Packet:
 
     source: int
     target: "Optional[NodeID]"
-    p_type: "PacketCode"
+    p_type: "PacketKindType"
     message: "Optional[str]"
 
     def __init__(
             self,
             source: int,
             target: "Optional[NodeID]",
-            p_type: "PacketCode",
+            p_type: "PacketKindType",
             identifier: int,
             message: "Optional[str]",
         ) -> None:
@@ -63,7 +63,7 @@ class Packet:
         if self.target is None:
             raise TargetUnspecifiedError(self.source, self.p_type, self.message)
 
-        if self.p_type == PacketType.DATA and self.message is None:
+        if self.p_type == PacketKind.DATA and self.message is None:
             raise MessageUnspecifiedError(self.source, self.p_type, self.target)
 
     def to_byte(self) -> bytearray:

@@ -7,18 +7,19 @@ except ImportError:
     TYPE_CHECKING = False # pyright: ignore[reportConstantRedefinition]
 
 if TYPE_CHECKING:
-    from typing import Literal
-    PacketCode = Literal[0, 1, 2, 3, 4]
+    from typing import NewType
+    PacketKindType = NewType("PacketKindType", int)
+
 else:
-    PacketCode = int
+    PacketKindType = int
 
-
-class PacketType:
+class PacketKind:
     """
     Define a set of codes used to indicate the packet type.
     """
-    CONTROL     : "PacketCode" = 0
-    ACK         : "PacketCode" = 1
-    DATA        : "PacketCode" = 2
-    CONFIRMABLE : "PacketCode" = 3
-    NACK        : "PacketCode" = 4
+    CONTROL     = PacketKindType(0)
+    ACK         = PacketKindType(1)
+    DATA        = PacketKindType(2)
+    CONFIRMABLE = PacketKindType(3)
+    NACK        = PacketKindType(4)
+

@@ -1,12 +1,20 @@
-from node.node import Node
-from regulations.EU863.bands import BANDS
-from models.packet import Packet
-from models.packet_type import PacketType
-from models.model import NodeID
 from time import sleep
 import random
 
-words = ("Testing", "Infinite Chickens", "no", "Cows go moo", "LoRa sounds like a nice project, right? right??", "Behind you!")
+from node.node import Node
+from regulations.EU863.bands import BANDS
+from models.packet import Packet
+from models.packet_type import PacketKind
+from models.model import NodeID
+
+words = (
+    "Testing",
+    "Infinite Chickens",
+    "no",
+    "Cows go moo",
+    "LoRa sounds like a nice project, right? right??",
+    "Behind you!",
+    )
 
 TRANSMIT = False
 RECEIVE = False
@@ -17,7 +25,7 @@ if TRANSMIT:
 
     node.peer_table.add_peer(NodeID(target))
     packet = Packet(
-        source, NodeID(target), PacketType.DATA, 0, "Hello World."
+        source, NodeID(target), PacketKind.DATA, 0, "Hello World."
     )
 
     while True:

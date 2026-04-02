@@ -5,7 +5,7 @@ from time import monotonic
 from node.mac.band_airtime import BandAirtime
 from node.mac.types.models import UsedTime, WaitTime
 
-from models.packet_type import PacketType, PacketCode
+from models.packet_type import PacketKind, PacketKindType
 
 
 
@@ -30,7 +30,7 @@ class BandSelect:
     def select_band(
             bands: "Sequence[BandAirtime]",
             packet_time: float,
-            packet_type: "PacketCode",
+            packet_type: "PacketKindType",
             time_scale: float,
             formula_weights: Tuple[float, float],
             temp: float,
@@ -39,7 +39,7 @@ class BandSelect:
             wait_horizon_sec: WaitTime,
             now: "Optional[float]" = None,
         ) -> Tuple[BandAirtime, WaitTime]:
-        if packet_type == PacketType.CONTROL:
+        if packet_type == PacketKind.CONTROL:
             return BandSelect.__control_packet_wait(bands, packet_time, now)
 
         return BandSelect.__data_packet_wait(

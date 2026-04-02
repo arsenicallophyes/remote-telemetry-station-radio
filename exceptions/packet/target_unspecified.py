@@ -2,7 +2,7 @@
 Define custom error for exceeding permitted power usage.
 """
 from exceptions.packet.packet_error import PacketError
-from models.packet import PacketCode
+from models.packet import PacketKindType
 
 
 try:
@@ -17,7 +17,7 @@ class TargetUnspecifiedError(PacketError):
     """
     Raised when the target node is not specified.
     """
-    def __init__(self, source: int, p_type: PacketCode, message: "Optional[str]") -> None:
+    def __init__(self, source: int, p_type: PacketKindType, message: "Optional[str]") -> None:
         message = (
             f"Source {source} has not specified the target node. "
             f"Attempted to send a packet of type {p_type}, with message of "

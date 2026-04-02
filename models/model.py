@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     CodingRate: TypeAlias = Literal[5, 6, 7, 8]
     Frequency = NewType("Frequency", float)
     NodeID = NewType("NodeID", int)
+    Message = NewType("Message", str)
+    Identifier = NewType("Identifier", int)
 else:
     SpreadingFactor = int
     CodingRate = int
