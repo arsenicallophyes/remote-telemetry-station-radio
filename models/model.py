@@ -16,3 +16,5 @@ else:
     CodingRate = int
     Frequency = float
     NodeID = int
+    Message = str
+    Identifier = int
