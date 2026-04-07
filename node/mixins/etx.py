@@ -1,6 +1,7 @@
 from time import monotonic, sleep
 
 from node.transport.peer_table import PeerTable
+from node.protocol.parameters import Parameters
 
 from models.packet import Packet
 from models.packet_type import PacketKind, PacketKindType
@@ -12,12 +13,13 @@ except ImportError:
     TYPE_CHECKING = False  # pyright: ignore[reportConstantRedefinition]
 
 if TYPE_CHECKING:
-    from typing import Optional, Literal, Tuple
+    from typing import Optional, Tuple
     from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
     from node.transport.peer import Peer
     from models.model import SpreadingFactor, CodingRate, Message, Identifier
     from regulations.types.model import Band
+    from node.protocol.parameters import ParametersDict, ParametersType
 
 ETX_MESSAGE = 0
 
@@ -48,15 +50,16 @@ class EtxMixin:
 
         def control_receive(
             self,
+            expected_parameter: ParametersType,
             listen_window: Optional[float] = None,
-        ) -> Optional[float]: ...
+        ) -> Optional[ParametersDict]:...
 
         def control_transmit_ack(
             self,
             packet: Packet,
             peer: Peer,
             now: Optional[float] = None,
-        ) -> Optional[Literal[1]]: ...
+        ) -> Optional[bool]: ...
 
         def decode_packet(
                 self,
@@ -92,14 +95,19 @@ class EtxMixin:
             )
             sleep(0.25)
 
-        received_packets = self.control_receive( # pylint: disable=assignment-from-no-return
+        parameters = self.control_receive( # pylint: disable=assignment-from-no-return
+            Parameters.ETX_COUNT,
             listen_window=self.wait_horizon_sec,
         )
-
-        if not received_packets:
+        if not parameters:
             return
 
-        return int(received_packets)
+        received_packets = parameters[Parameters.ETX_COUNT]
+
+        if not isinstance(received_packets, int):
+            return
+
+        return received_packets
 
     def etx_receive(
             self,

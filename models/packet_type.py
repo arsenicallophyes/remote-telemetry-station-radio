@@ -15,6 +15,7 @@ else:
 
 class PacketKind:
     """
+    @enum
     Define a set of codes used to indicate the packet type.
     """
     CONTROL     = PacketKindType(0)
@@ -22,4 +23,3 @@ class PacketKind:
     DATA        = PacketKindType(2)
     CONFIRMABLE = PacketKindType(3)
     NACK        = PacketKindType(4)
-

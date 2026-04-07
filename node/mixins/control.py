@@ -1,5 +1,5 @@
 import random
-from time import monotonic, sleep
+from time import monotonic, sleep, struct_time
 
 
 from node.mixins.state import NodeState
@@ -8,6 +8,7 @@ from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.retransmit_state import RetransmitState
 from node.storage.persistance_manager import PersistenceManager
+from node.protocol.parameters import validate_parameters, Parameters, ParametersType
 
 from models.packet import Packet
 from models.model import NodeID
@@ -19,16 +20,17 @@ except ImportError:
     TYPE_CHECKING = False  # pyright: ignore[reportConstantRedefinition]
 
 if TYPE_CHECKING:
-    from typing import Optional, Set, Tuple, Literal, Dict, List
+    from typing import Optional, Set, Tuple, List
     from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
-    from models.model import SpreadingFactor, CodingRate
+    from models.model import SpreadingFactor, CodingRate, Frequency, Message, Identifier
     from regulations.types.model import Band
 
-    from models.model import Message, Identifier
     from models.packet_type import PacketKindType
+    from node.protocol.parameters import ParametersDict
+    from node.mac.band_airtime import BandAirtime
 
-ACK_MESSAGE  = 1
+ACK_MESSAGE  = "1"
 NACK_IGNORE  = "IGNORE"
 
 
@@ -64,6 +66,12 @@ class ControlMixin(NodeState):
             packet_bytes: bytearray,
         ) -> Tuple[Message, NodeID, Identifier, PacketKindType]: ...
 
+        def acquire_channel(
+            self,
+            packet: Packet,
+            now: "Optional[float]" = None,
+        ) -> "Tuple[Frequency, BandAirtime, float]": ...
+
     def _control_transmit_nack(
         self,
         packet: Packet,
@@ -86,6 +94,7 @@ class ControlMixin(NodeState):
         n = 0
         while n < self.control_transmition_retries:
             n += 1
+            self.acquire_channel(packet, now)
             r.send(
                 packet.to_byte(),
                 destination=packet.target,
@@ -124,7 +133,7 @@ class ControlMixin(NodeState):
         packet: Packet,
         peer: Peer,
         now: "Optional[float]" = None,
-    ) -> "Optional[Literal[1]]":
+    ) -> "Optional[bool]":
         now = monotonic() if now is None else now
         r = self.rfm9x
 
@@ -141,6 +150,7 @@ class ControlMixin(NodeState):
         n = 0
         while n < self.control_transmition_retries:
             n += 1
+            self.acquire_channel(packet, now)
             r.send(
                 packet.to_byte(),
                 destination=packet.target,
@@ -164,7 +174,6 @@ class ControlMixin(NodeState):
 
             if not message.isdecimal():
                 continue
-            message = int(message)
 
             if message != ACK_MESSAGE:
                 print("Wrong message", f"{message=}")
@@ -172,12 +181,13 @@ class ControlMixin(NodeState):
 
             print(f"Ack Received {message=}")
             peer.transmit.increment_sequence()
-            return message
+            return True
 
     def control_receive(
         self,
+        expected_parameter: ParametersType,
         listen_window: "Optional[float]" = None,
-    ) -> "Optional[float]":
+    ) -> "Optional[ParametersDict]":
         r = self.rfm9x
         r.frequency_mhz = self.control_frequency
 
@@ -197,7 +207,6 @@ class ControlMixin(NodeState):
                 continue
 
             message, source, _, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
-            message = str(message)
 
             if packet_kind != PacketKind.CONTROL:
                 continue
@@ -208,48 +217,42 @@ class ControlMixin(NodeState):
                 print(f"Unregistered peer: {source=}: {message}")
                 continue
 
-            parameters: "Dict[str, float]" = {}
-            args: "List[str]" = message.split(":")
-
-            if len(args) % 2 != 0:
-                print(f"Invalid paramters format: {message=}")
-                continue
-
-            try:
-                for i in range(0, len(args), 2):
-                    parameters[args[i]] = float(args[i+1])
-            except IndexError:
-                print(f"Index Error: {message=}")
-                continue
-            except KeyError:
-                print(f"Key Error: {message=}")
-                continue
+            parameters = validate_parameters(message) # pylint: disable=assignment-from-no-return
 
             if not parameters:
                 continue
 
-            frequency   = parameters.get("DT")
-            packet_time = parameters.get("PT")
-            etx_count   = parameters.get("ET")
+            timestamp = parameters.get(Parameters.TIMESTAMP)
 
-            if not etx_count or not (frequency and packet_time):
+            if not timestamp:
                 continue
 
+            if not isinstance(timestamp, struct_time):
+                continue
+
+            if not parameters.get(expected_parameter):
+                continue
+            
+            ack_packet = Packet(
+                self.node_id,
+                source,
+                PacketKind.ACK,
+                peer.transmit.next_seq,
+                "1",
+            )
+
+            self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
             r.send(
-                b"1",
-                destination=source,
-                node=self.node_id,
-                identifier=peer.transmit.next_seq,
-                flags=PacketKind.ACK
+                ack_packet.to_byte(),
+                destination=ack_packet.target,
+                node=ack_packet.source,
+                identifier=ack_packet.identifier,
+                flags=ack_packet.p_type
             )
             peer.transmit.increment_sequence()
-            sleep(0.15)
-            if frequency and packet_time:
-                r.frequency_mhz = frequency
-                r.listen()
-                return packet_time
-            elif etx_count:
-                return etx_count
+
+            return parameters
+
 
     def control_send_NACK(
         self,

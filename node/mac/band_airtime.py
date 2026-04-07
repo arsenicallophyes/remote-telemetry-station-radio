@@ -22,9 +22,9 @@ class BandAirtime:
         self.name = name
         self.dc = dc
         self._hourly_budget = DutyCycles.to_hourly_budget(dc)
+        self._used_time: float = 0.0
+        self._tx_log: "Deque[Tuple[float, float]]" = deque((), 128)
 
-    _used_time: float = 0.0
-    _tx_log: "Deque[Tuple[float, float]]" = deque((), 128)
     _window_sec: int = 3600
 
     @property

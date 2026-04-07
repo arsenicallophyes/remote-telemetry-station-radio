@@ -67,7 +67,7 @@ class Airtime:
         :type ih: bool
         :param de: Low data rate optimization enabled (DE=1)
         :type de: bool
-        :param cr: Coding rate, 1 for 4/5 ... 4 for 4/8
+        :param cr: Coding rate from 5 to 8
         :type cr: "CodingRate"
         :param crc: True => CRC enabled.
         :type crc: bool
@@ -77,7 +77,7 @@ class Airtime:
         num = Airtime._payload_numerator(pl_bytes, sf, crc, ih)
         den = Airtime._payload_denominator(sf, de)
         blocks = Airtime._payload_symbol_blocks(num, den)
-        return 8 + blocks * (cr + 4)
+        return 8 + blocks * cr
 
     @staticmethod
     def _packet_time(n_payload_symbols: int, t_sym: float, n_preamble: int) -> float:

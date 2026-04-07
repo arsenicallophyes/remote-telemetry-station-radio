@@ -1,4 +1,4 @@
-from time import struct_time
+from time import struct_time, sleep, monotonic
 
 import rtc # pyright: ignore[reportMissingModuleSource] # pylint: disable=import-error
 import board
@@ -6,8 +6,14 @@ import busio
 import digitalio
 from adafruit_rfm9x_patched import RFM9x
 
+from models.packet import Packet
+from models.packet_type import PacketKind
+
 from node.mac.duty_cycle_tracker import DutyCycleTracker
 from node.mac.channel_selection import ChannelSelect
+from node.mac.airtime import Airtime
+from node.mac.band_selection import BandSelect
+
 from regulations.types.model import BandsSeq
 
 
@@ -17,14 +23,37 @@ except ImportError:
     TYPE_CHECKING = False  # pyright: ignore[reportConstantRedefinition]
 
 if TYPE_CHECKING:
-    from models.model import SpreadingFactor, CodingRate
+    from typing import Tuple, Optional
+    from models.model import SpreadingFactor, CodingRate, Frequency
+    from node.mac.types.models import WaitTime
+    from node.mac.band_airtime import BandAirtime
+    from regulations.band import Band
 
+
+# Adafruit RFM9X library does not support implicit header mode,
+# so spreading factor 6 is unavailable (it requires an implicit header).
+IMPLICIT_HEADER_MODE = False
 
 
 class RadioMixin:
     node_id : int
     dc_tracker: DutyCycleTracker
     channels: ChannelSelect
+
+
+    time_scale:              float
+    formula_weights:         "Tuple[float, float]"
+    temp:                    float
+    min_control_reserve_ratio: float
+    allow_wait_candidates:   bool
+    wait_horizon_sec:        "WaitTime"
+    ack_wait:                float
+    spreading_factor:        "SpreadingFactor"
+    bandwidth:               int
+    coding_rate:             "CodingRate"
+
+    control_band: "Band"
+    control_frequency:       float
 
     def __init_rtc__(self):
         self.rtc = rtc.RTC()
@@ -59,7 +88,7 @@ class RadioMixin:
         tx_power_dbm: int,
         crc: bool = True,
         preamble: int = 8,
-        ) -> None:
+    ) -> None:
 
         r = self.rfm9x
         r.spreading_factor = sf
@@ -68,3 +97,45 @@ class RadioMixin:
         r.tx_power = tx_power_dbm
         r.enable_crc = crc
         r.preamble_length = preamble
+
+    def acquire_channel(
+        self,
+        packet: Packet,
+        now: "Optional[float]" = None,
+    ) -> "Tuple[Frequency, BandAirtime, float]":
+        # Additional 4 bytes added by the RFM9x library due to explicit header mode
+        # Maximum payload size 252 + 4 bytes header = 256 bytes
+        r = self.rfm9x
+        now = monotonic() if now is None else now
+        packet_bytes = len(packet.to_byte()) + 4
+        packet_time = Airtime.total_time(
+            r.signal_bandwidth,
+            r.spreading_factor,
+            r.preamble_length,
+            packet_bytes,
+            IMPLICIT_HEADER_MODE,
+            r.low_datarate_optimize,
+            r.coding_rate,
+            r.enable_crc
+        )
+        if packet.p_type == PacketKind.CONTROL:
+            bands = (self.dc_tracker.bands_airtime[self.control_band.name],)
+        else:
+            bands = self.dc_tracker.get_registered_bands()
+        band, wait_time = BandSelect.select_band(
+            bands,
+            packet_time,
+            packet.p_type,
+            self.time_scale,
+            self.formula_weights,
+            self.temp,
+            self.min_control_reserve_ratio,
+            self.allow_wait_candidates,
+            self.wait_horizon_sec,
+            now,
+        )
+        sleep(wait_time)
+        self.dc_tracker.validate_can_transmit(band.name, packet_time)
+        frequency = self.channels.select_channel(band.name)
+
+        return frequency, band, packet_time

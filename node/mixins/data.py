@@ -1,20 +1,15 @@
-from time import monotonic, sleep
+from time import monotonic
 
 from node.mixins.state import NodeState
-from node.mac.airtime import Airtime
-from node.mac.band_selection import BandSelect
 from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.recovery_state import RecoveryState
 from node.storage.persistance_manager import PersistenceManager
+from node.protocol.parameters import add_parameter, Parameters
 
 from models.packet import Packet
 from models.packet_type import PacketKind
 from models.model import NodeID
-
-# Adafruit RFM9X library does not support implicit header mode,
-# so spreading factor 6 is unavailable (it requires an implicit header).
-IMPLICIT_HEADER_MODE = False
 
 try:
     from typing import TYPE_CHECKING
@@ -22,15 +17,22 @@ except ImportError:
     TYPE_CHECKING = False  # pyright: ignore[reportConstantRedefinition]
 
 if TYPE_CHECKING:
-    from typing import Optional, Tuple, Set, Literal
+    from typing import Optional, Tuple, Set
+    from time import struct_time
+
     from adafruit_rfm9x_patched import RFM9x
+
     from node.mac.band_airtime import WaitTime
     from node.mac.duty_cycle_tracker import DutyCycleTracker
     from node.mac.channel_selection import ChannelSelect
+    from node.mac.band_airtime import BandAirtime
+
     from node.transport.peer import Peer
-    from models.model import SpreadingFactor, CodingRate, Message, Identifier
+
+    from node.protocol.parameters import ParametersDict, ParametersType
+
+    from models.model import SpreadingFactor, CodingRate, Message, Identifier, Frequency
     from models.packet_type import PacketKindType
-    from time import struct_time
 
 
 
@@ -42,17 +44,13 @@ class DataMixin(NodeState):
     dc_tracker:          "DutyCycleTracker"
     channels:            "ChannelSelect"
 
-    time_scale:              float
-    formula_weights:         "Tuple[float, float]"
-    temp:                    float
-    min_control_reserve_ratio: float
-    allow_wait_candidates:   bool
-    wait_horizon_sec:        "WaitTime"
     ack_wait:                float
-    spreading_factor:        "SpreadingFactor"
+    control_frequency:       float
     bandwidth:               int
     coding_rate:             "CodingRate"
-    control_frequency:       float
+    spreading_factor:        "SpreadingFactor"
+    wait_horizon_sec:        "WaitTime"
+
 
     if TYPE_CHECKING:
         # pylint: disable=unused-argument
@@ -60,38 +58,39 @@ class DataMixin(NodeState):
             self,
             packet: Packet,
             peer: Peer,
-            now: "Optional[float]" = None,
-        ) -> "Optional[Set[int]]": ...
+            now: Optional[float] = None,
+        ) -> Optional[Set[int]]: ...
 
         def control_transmit_ack(
             self,
             packet: Packet,
             peer: Peer,
-            now: "Optional[float]" = None,
-        ) -> "Optional[Literal[1]]": ...
+            now: Optional[float] = None,
+        ) -> Optional[bool]: ...
 
         def control_receive(
             self,
-            listen_window: "Optional[float]" = None,
-        ) -> "Optional[float]": ...
+            expected_parameter: ParametersType,
+            listen_window: Optional[float] = None,
+        ) -> Optional[ParametersDict]: ...
 
         def control_send_NACK(
             self,
             source: NodeID,
-            now: "Optional[float]" = None
-        ) -> "Optional[Set[int]]": ...
+            now: Optional[float] = None
+        ) -> Optional[Set[int]]: ...
 
         def control_listen_NACK(
             self,
             expected_source: NodeID,
-            now: "Optional[float]" = None,
+            now: Optional[float] = None,
         ) -> None: ...
 
         def apply_link_profile(
             self,
-            sf: "SpreadingFactor",
+            sf: SpreadingFactor,
             bw: int,
-            cr: "CodingRate",
+            cr: CodingRate,
             tx_power_dbm: int,
             crc: bool = True,
             preamble: int = 8,
@@ -105,13 +104,19 @@ class DataMixin(NodeState):
         def extract_timestamp(
             self,
             message: Message,
-        ) -> "Optional[struct_time]": ...
+        ) -> Optional[struct_time]: ...
 
         def log_peer_activity(
             self,
             peer: Peer,
             identifier: int,
         ) -> None: ...
+
+        def acquire_channel(
+            self,
+            packet: Packet,
+            now: Optional[float] = None,
+        ) -> Tuple[Frequency, BandAirtime, float]: ...
 
     def data_transmit(self, packet: Packet, now: "Optional[float]" = None) -> None:
         now = monotonic() if now is None else now
@@ -129,56 +134,29 @@ class DataMixin(NodeState):
             print("Peer Unregistered")
             return
 
-        # Additional 4 bytes added by the RFM9x library due to explicit header mode
-        # Maximum payload size 252 + 4 bytes header = 256 bytes
-        packet_bytes = len(packet.to_byte()) + 4
-        packet_time = Airtime.total_time(
-            r.signal_bandwidth,
-            r.spreading_factor,
-            r.preamble_length,
-            packet_bytes,
-            IMPLICIT_HEADER_MODE,
-            r.low_datarate_optimize,
-            r.coding_rate,
-            r.crc_error()
-        )
+        frequency, band, packet_time = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
+        arguments = str(frequency), str(packet_time)
+        message = add_parameter(None, Parameters.FREQUENCY_SWITCH, *arguments)
 
-        bands = self.dc_tracker.get_registered_bands()
-        band, wait_time = BandSelect.select_band(
-            bands,
-            packet_time,
-            packet.p_type,
-            self.time_scale,
-            self.formula_weights,
-            self.temp,
-            self.min_control_reserve_ratio,
-            self.allow_wait_candidates,
-            self.wait_horizon_sec,
-            now,
-        )
-        sleep(wait_time)
-        self.dc_tracker.validate_can_transmit(band.name, packet_time)
-        frequency = self.channels.select_channel(band.name)
         control_packet = Packet(
             self.node_id,
             packet.target,
             PacketKind.CONTROL,
             peer.transmit.next_seq,
-            f"DT:{frequency}:PT:{packet_time}"
+            message,
         )
+
         if not self.control_transmit_ack(control_packet, peer, now):
             print("Receiver unresponsive")
             return
 
-        # Annotation at @property frequency changed from Literal[433.0, 915.0] to float
-        sleep(0.15)
         r.frequency_mhz = frequency
 
         self.apply_link_profile( # pylint: disable=assignment-from-no-return
             self.spreading_factor,
             self.bandwidth,
             self.coding_rate,
-            10,
+            25,
             True,
         )
 
@@ -202,14 +180,27 @@ class DataMixin(NodeState):
             recovery_source: "Optional[NodeID]" = None,
             now: "Optional[float]" = None,
         ) -> "Optional[str]":
+
         now = monotonic() if now is None else now
         r = self.rfm9x
-        try:
-            packet_time = self.control_receive(listen_window=float(self.wait_horizon_sec)) # pylint: disable=assignment-from-no-return
-            if not packet_time:
-                return
 
-            timeout = 2 * packet_time + self.ack_wait
+        parameters = self.control_receive( # pylint: disable=assignment-from-no-return
+            Parameters.FREQUENCY_SWITCH,
+            listen_window=float(self.wait_horizon_sec),
+        )
+
+        if not parameters:
+            return
+
+        frequency, packet_time = parameters[Parameters.FREQUENCY_SWITCH]
+
+        if not (isinstance(frequency, float) and isinstance(packet_time, float)):
+            return
+
+        r.frequency_mhz = frequency
+        timeout = 2 * packet_time + self.ack_wait
+
+        try:
 
             packet_bytes = r.receive(with_header=True, timeout=timeout)
 
