@@ -5,7 +5,8 @@ from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.recovery_state import RecoveryState
 from node.storage.persistance_manager import PersistenceManager
-from node.protocol.parameters import add_parameter, Parameters
+from node.protocol.parameters import Parameters, add_parameter, add_timestamp
+from node.transport.types.authorization_state import AuthorizationState
 
 from models.packet import Packet
 from models.packet_type import PacketKind
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from typing import Optional, Tuple, Set
     from time import struct_time
 
+    from rtc import RTC # pyright: ignore[reportMissingModuleSource] # pylint: disable=import-error
     from adafruit_rfm9x_patched import RFM9x
 
     from node.mac.band_airtime import WaitTime
@@ -37,8 +39,10 @@ if TYPE_CHECKING:
 
 
 class DataMixin(NodeState):
-    rfm9x:               "RFM9x"
-    node_id:             int
+    rfm9x:     "RFM9x"
+    node_id:   int
+    rtc:       "RTC"
+
     peer_table:          PeerTable
     persistence_manager: PersistenceManager
     dc_tracker:          "DutyCycleTracker"
@@ -118,6 +122,11 @@ class DataMixin(NodeState):
             now: Optional[float] = None,
         ) -> Tuple[Frequency, BandAirtime, float]: ...
 
+        def network_rejoin(
+            self,
+            peer: Peer,
+        ) -> None: ...
+
     def data_transmit(self, packet: Packet, now: "Optional[float]" = None) -> None:
         now = monotonic() if now is None else now
         r = self.rfm9x
@@ -130,13 +139,19 @@ class DataMixin(NodeState):
             return
 
         peer = self.peer_table.get_peer(packet.target)
-        if peer is None:
+        if not peer:
             print("Peer Unregistered")
+            return
+
+        if peer.state == AuthorizationState.PENDING:
+            self.network_rejoin(peer)
             return
 
         frequency, band, packet_time = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
         arguments = str(frequency), str(packet_time)
         message = add_parameter(None, Parameters.FREQUENCY_SWITCH, *arguments)
+        current_time = self.rtc.datetime
+        message = add_timestamp(current_time, message)
 
         control_packet = Packet(
             self.node_id,
@@ -237,8 +252,11 @@ class DataMixin(NodeState):
                 return
 
             peer = self.peer_table.get_peer(source)
-
             if not peer:
+                return
+
+            if response == SequenceResponse.PENDING:
+                self.network_rejoin(peer)
                 return
 
             if response == SequenceResponse.DUPLICATE:

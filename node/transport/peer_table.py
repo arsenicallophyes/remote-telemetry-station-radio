@@ -1,7 +1,7 @@
 from node.transport.peer import Peer, HALF, MAX_SEQ
 from node.transport.types.sequence_response import SequenceResponse, SequenceResponseType
 from node.transport.types.recovery_state import RecoveryState
-from node.transport.types.authorization_state import AuthorizationStateType
+from node.transport.types.authorization_state import AuthorizationStateType, AuthorizationState
 
 from models.model import NodeID, Identifier
 
@@ -53,9 +53,12 @@ class PeerTable:
         returns SequenceResponse
         """
         peer = self.get_peer(node_id)
-        if peer is None:
+        if not peer:
             print("Unregistered Peer")
             return SequenceResponse.UNREGISTERED
+
+        if peer.state == AuthorizationState.PENDING:
+            return SequenceResponse.PENDING
 
         expected = peer.receive.expected_seq
         delta = peer.receive.seq_delta(seq, expected)
@@ -82,9 +85,12 @@ class PeerTable:
         ) -> SequenceResponseType:
 
         peer = self.get_peer(node_id)
-        if peer is None:
+        if not peer:
             print("Unregistered Peer")
             return SequenceResponse.UNREGISTERED
+
+        if peer.state == AuthorizationState.PENDING:
+            return SequenceResponse.PENDING
 
         if identifier in recovery.queued_packets:
             recovery.queued_packets.discard(identifier)

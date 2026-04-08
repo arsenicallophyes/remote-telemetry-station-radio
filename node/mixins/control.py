@@ -78,6 +78,12 @@ class ControlMixin(NodeState):
             source: NodeID,
         ) -> None: ...
 
+        def network_join(
+            self,
+            listen_window: "Optional[float]",
+            now: "Optional[float]" = None,
+        ) -> None: ...
+
     def _control_transmit_nack(
         self,
         packet: Packet,
@@ -191,7 +197,7 @@ class ControlMixin(NodeState):
 
     def control_receive(
         self,
-        expected_parameter: ParametersType,
+        expected_parameter: "Optional[ParametersType]" = None,
         listen_window: "Optional[float]" = None,
     ) -> "Optional[Tuple[ParametersDict, NodeID]]":
         r = self.rfm9x
@@ -238,22 +244,37 @@ class ControlMixin(NodeState):
                     self.network_accept(network_id, source) # pylint: disable=assignment-from-no-return
                     return
 
-                network_accept_sequence = parameters.get(CommandParameters.NETWORK_ACCEPT)
-                if network_accept_sequence:
-                    return parameters, source
+                if expected_parameter == CommandParameters.NETWORK_ACCEPT:
+                    network_accept_sequence = parameters.get(CommandParameters.NETWORK_ACCEPT)
+                    if network_accept_sequence and isinstance(network_accept_sequence, int):
+                        ack_packet = Packet(self.node_id, source, PacketKind.ACK, 0, ACK_MESSAGE)
+                        self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
+                        r.send(
+                            ack_packet.to_byte(),
+                            destination=ack_packet.target,
+                            node=ack_packet.source,
+                            identifier=ack_packet.identifier,
+                            flags=ack_packet.p_type
+                        )
+                        return parameters, source
 
                 print(f"Unregistered peer: {source=}: {message}")
                 continue
+
+            if parameters.get(CommandParameters.NETWORK_REJOIN):
+                # Return parameter, don't ack, runtime
+                # code checks for NETWORK_REJOIN and calls network_join
+                return parameters, source
 
             ack_packet = Packet(
                 self.node_id,
                 source,
                 PacketKind.ACK,
                 peer.transmit.next_seq,
-                "1",
+                ACK_MESSAGE,
             )
 
-            if not parameters.get(expected_parameter):
+            if expected_parameter and not parameters.get(expected_parameter):
                 continue
 
             self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return

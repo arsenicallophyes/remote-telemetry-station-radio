@@ -76,7 +76,7 @@ class CommandsMixin:
 
         message = add_parameter(None, CommandParameters.NETWORK_JOIN, NETWORK_ID.decode()) #  pylint: disable=assignment-from-no-return
         current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message) # pylint: disable=assignment-from-no-return
+        message = add_timestamp(current_time, message)
 
         packet = Packet(self.node_id, BROADCAST_ADDRESS, PacketKind.CONTROL, 0, message)
 
@@ -106,7 +106,7 @@ class CommandsMixin:
 
         if not isinstance(seq, int):
             return
-        
+
         seq = Identifier(seq)
 
         self.peer_table.add_peer(source, AuthorizationState.REGISTERED, seq)
@@ -115,7 +115,7 @@ class CommandsMixin:
     def network_accept(self, network_id: bytes, source: NodeID) -> None:
         if network_id != NETWORK_ID:
             return
-
+    
         peer = self.peer_table.get_peer(source)
 
         if peer and peer.state == AuthorizationState.REGISTERED:
@@ -133,12 +133,31 @@ class CommandsMixin:
 
         message = add_parameter(None, CommandParameters.NETWORK_ACCEPT, str(peer.transmit.next_seq))
         current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message) # pylint: disable=assignment-from-no-return
+        message = add_timestamp(current_time, message)
 
 
         packet = Packet(
             self.node_id,
             source,
+            PacketKind.CONTROL,
+            peer.transmit.next_seq,
+            message,
+        )
+
+        response = self.control_transmit_await_ack(packet, peer) # pylint: disable=assignment-from-no-return
+
+        if response:
+            peer.state = AuthorizationState.REGISTERED
+
+    def network_rejoin(self, peer: Peer) -> None:
+
+        message = add_parameter(None, CommandParameters.NETWORK_REJOIN)
+        current_time = self.rtc.datetime
+        message = add_timestamp(current_time, message)
+
+        packet = Packet(
+            self.node_id,
+            peer.node_id,
             PacketKind.CONTROL,
             peer.transmit.next_seq,
             message,

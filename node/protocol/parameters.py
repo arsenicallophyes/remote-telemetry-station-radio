@@ -21,10 +21,7 @@ if TYPE_CHECKING:
 else:
     ParametersType = str
 
-
-
 class Separator:
-
     FIELD = ";"
     KEY_VALUE = "="
     ARGS = ","
@@ -43,6 +40,7 @@ class CommandParameters:
     """
     NETWORK_JOIN      = ParametersType("NJ")
     NETWORK_ACCEPT    = ParametersType("NA")
+    NETWORK_REJOIN    = ParametersType("RJ")
 
 
 # Function used to validate parameters must either return a value
@@ -161,6 +159,10 @@ COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
         "argc" : 1,
         "validator": validate_network_accept
     },
+    CommandParameters.NETWORK_REJOIN: {
+        "argc": 1,
+        "validator": lambda x: True
+    }
 }
 
 ALL_RULES: "Dict[ParametersType, ParameterRule]" = {}
@@ -220,12 +222,12 @@ def add_parameter(
     *args: str
 ) -> Message:
     arguments = Separator.ARGS.join(args)
-    feild = parameter + Separator.KEY_VALUE + arguments
+    field = parameter + Separator.KEY_VALUE + arguments
 
     if message:
-        return Message(message + Separator.FIELD + feild)
+        return Message(message + Separator.FIELD + field)
 
-    return Message(feild)
+    return Message(field)
 
 
 def add_timestamp(now: struct_time, message: Message) -> str:

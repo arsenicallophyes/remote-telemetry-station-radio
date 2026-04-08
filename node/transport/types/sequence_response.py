@@ -17,4 +17,5 @@ class SequenceResponse:
     AHEAD        = SequenceResponseType(1)
     DUPLICATE    = SequenceResponseType(2)
     UNREGISTERED = SequenceResponseType(3)
-    ABORT        = SequenceResponseType(4)
+    PENDING      = SequenceResponseType(4)
+    ABORT        = SequenceResponseType(5)
