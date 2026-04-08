@@ -20,8 +20,9 @@ if TYPE_CHECKING:
     from rtc import RTC # pyright: ignore[reportMissingModuleSource] # pylint: disable=import-error
     from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
-    from models.model import SpreadingFactor, CodingRate
+    from models.model import SpreadingFactor, CodingRate, Frequency
     from node.protocol.parameters import ParametersDict, ParametersType
+    from node.mac.band_airtime import BandAirtime
 
 
 
@@ -64,6 +65,12 @@ class CommandsMixin:
             peer: Peer,
             now: "Optional[float]" = None,
         ) -> "Optional[bool]": ...
+    
+        def acquire_channel(
+            self,
+            packet: Packet,
+            now: "Optional[float]" = None,
+        ) -> "Tuple[Frequency, BandAirtime, float]": ...
 
 
     def network_join(
@@ -79,43 +86,44 @@ class CommandsMixin:
         message = add_timestamp(current_time, message)
 
         packet = Packet(self.node_id, BROADCAST_ADDRESS, PacketKind.CONTROL, 0, message)
+        self.acquire_channel(packet, now)
+        r.send(
+            packet.to_byte(),
+            destination=packet.target,
+            node=packet.source,
+            identifier=packet.identifier,
+            flags=packet.p_type
+        )
+        sleep(0.4)
 
         deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
 
         while monotonic() < deadline:
-            r.send(
-                packet.to_byte(),
-                destination=packet.target,
-                node=packet.source,
-                identifier=packet.identifier,
-                flags=packet.p_type
+
+            response = self.control_receive( # pylint: disable=assignment-from-no-return
+                CommandParameters.NETWORK_ACCEPT,
+                listen_window=self.wait_horizon_sec,
             )
-        sleep(0.25)
 
-        response = self.control_receive( # pylint: disable=assignment-from-no-return
-            CommandParameters.NETWORK_ACCEPT,
-            listen_window=self.wait_horizon_sec,
-        )
+            if not response:
+                continue
 
-        if not response:
-            return
+            parameters, source = response
 
-        parameters, source = response
+            seq = parameters[CommandParameters.NETWORK_ACCEPT]
 
-        seq = parameters[CommandParameters.NETWORK_ACCEPT]
+            if not isinstance(seq, int):
+                continue
 
-        if not isinstance(seq, int):
-            return
+            seq = Identifier(seq)
 
-        seq = Identifier(seq)
-
-        self.peer_table.add_peer(source, AuthorizationState.REGISTERED, seq)
+            self.peer_table.add_peer(source, AuthorizationState.REGISTERED, seq)
 
 
     def network_accept(self, network_id: bytes, source: NodeID) -> None:
         if network_id != NETWORK_ID:
             return
-    
+
         peer = self.peer_table.get_peer(source)
 
         if peer and peer.state == AuthorizationState.REGISTERED:
