@@ -52,9 +52,9 @@ class EtxMixin:
             self,
             expected_parameter: ParametersType,
             listen_window: Optional[float] = None,
-        ) -> Optional[ParametersDict]:...
+        ) -> Optional[Tuple[ParametersDict, NodeID]]:...
 
-        def control_transmit_ack(
+        def control_transmit_await_ack(
             self,
             packet: Packet,
             peer: Peer,
@@ -95,12 +95,14 @@ class EtxMixin:
             )
             sleep(0.25)
 
-        parameters = self.control_receive( # pylint: disable=assignment-from-no-return
+        response = self.control_receive( # pylint: disable=assignment-from-no-return
             Parameters.ETX_COUNT,
             listen_window=self.wait_horizon_sec,
         )
-        if not parameters:
+        if not response:
             return
+
+        parameters, _ = response
 
         received_packets = parameters[Parameters.ETX_COUNT]
 
@@ -161,7 +163,7 @@ class EtxMixin:
 
         packet = Packet(self.node_id, expected_source, PacketKind.CONTROL, 0, f"ET:{n}")
 
-        response = self.control_transmit_ack(packet, peer, now) # pylint: disable=assignment-from-no-return
+        response = self.control_transmit_await_ack(packet, peer, now) # pylint: disable=assignment-from-no-return
 
         if not response:
             return

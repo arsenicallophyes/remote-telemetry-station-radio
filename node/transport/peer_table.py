@@ -1,7 +1,10 @@
 from node.transport.peer import Peer, HALF, MAX_SEQ
 from node.transport.types.sequence_response import SequenceResponse, SequenceResponseType
-from models.model import NodeID
 from node.transport.types.recovery_state import RecoveryState
+from node.transport.types.authorization_state import AuthorizationStateType
+
+from models.model import NodeID, Identifier
+
 
 try:
     from typing import TYPE_CHECKING
@@ -16,11 +19,20 @@ class PeerTable:
     def __init__(self) -> None:
         self.peers: "Dict[NodeID, Peer]" = {}
 
-    def add_peer(self, node_id: NodeID) -> bool:
+    def add_peer(
+        self,
+        node_id: NodeID,
+        state: AuthorizationStateType,
+        sequence: "Optional[Identifier]" = None,
+    ) -> bool:
         peer = self.peers.get(node_id)
 
         if peer is None:
-            self.peers[node_id] = Peer(node_id)
+            peer = Peer(node_id, state)
+            if sequence:
+                peer.receive.set_sequence(sequence)
+            self.peers[node_id] = peer
+
             return True
 
         return False

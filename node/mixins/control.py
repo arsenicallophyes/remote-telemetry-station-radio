@@ -8,7 +8,7 @@ from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.retransmit_state import RetransmitState
 from node.storage.persistance_manager import PersistenceManager
-from node.protocol.parameters import validate_parameters, Parameters, ParametersType
+from node.protocol.parameters import validate_parameters, Parameters, ParametersType, CommandParameters
 
 from models.packet import Packet
 from models.model import NodeID
@@ -72,6 +72,12 @@ class ControlMixin(NodeState):
             now: "Optional[float]" = None,
         ) -> "Tuple[Frequency, BandAirtime, float]": ...
 
+        def network_accept(
+            self,
+            network_id: bytes,
+            source: NodeID,
+        ) -> None: ...
+
     def _control_transmit_nack(
         self,
         packet: Packet,
@@ -128,7 +134,7 @@ class ControlMixin(NodeState):
             peer.transmit.increment_sequence()
             return queued_packets
 
-    def control_transmit_ack(
+    def control_transmit_await_ack(
         self,
         packet: Packet,
         peer: Peer,
@@ -187,7 +193,7 @@ class ControlMixin(NodeState):
         self,
         expected_parameter: ParametersType,
         listen_window: "Optional[float]" = None,
-    ) -> "Optional[ParametersDict]":
+    ) -> "Optional[Tuple[ParametersDict, NodeID]]":
         r = self.rfm9x
         r.frequency_mhz = self.control_frequency
 
@@ -211,12 +217,6 @@ class ControlMixin(NodeState):
             if packet_kind != PacketKind.CONTROL:
                 continue
 
-            peer = self.peer_table.get_peer(source)
-
-            if not peer:
-                print(f"Unregistered peer: {source=}: {message}")
-                continue
-
             parameters = validate_parameters(message) # pylint: disable=assignment-from-no-return
 
             if not parameters:
@@ -230,9 +230,21 @@ class ControlMixin(NodeState):
             if not isinstance(timestamp, struct_time):
                 continue
 
-            if not parameters.get(expected_parameter):
+            peer = self.peer_table.get_peer(source)
+
+            if not peer:
+                network_id = parameters.get(CommandParameters.NETWORK_JOIN)
+                if network_id and isinstance(network_id, bytes):
+                    self.network_accept(network_id, source) # pylint: disable=assignment-from-no-return
+                    return
+
+                network_accept_sequence = parameters.get(CommandParameters.NETWORK_ACCEPT)
+                if network_accept_sequence:
+                    return parameters, source
+
+                print(f"Unregistered peer: {source=}: {message}")
                 continue
-            
+
             ack_packet = Packet(
                 self.node_id,
                 source,
@@ -240,6 +252,9 @@ class ControlMixin(NodeState):
                 peer.transmit.next_seq,
                 "1",
             )
+
+            if not parameters.get(expected_parameter):
+                continue
 
             self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
             r.send(
@@ -249,9 +264,10 @@ class ControlMixin(NodeState):
                 identifier=ack_packet.identifier,
                 flags=ack_packet.p_type
             )
+
             peer.transmit.increment_sequence()
 
-            return parameters
+            return parameters, source
 
 
     def control_send_NACK(

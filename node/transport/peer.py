@@ -1,4 +1,5 @@
 from models.model import NodeID
+from node.transport.types.authorization_state import AuthorizationStateType
 
 try:
     from typing import TYPE_CHECKING
@@ -18,14 +19,16 @@ class Peer:
     """
     __slots__ = (
         "node_id",
+        "state",
         "transmit",
         "receive",
     )
 
-    def __init__(self, node_id: "NodeID") -> None:
+    def __init__(self, node_id: NodeID, state: AuthorizationStateType) -> None:
         self.node_id = node_id
+        self.state   = state
         self.transmit = TransmitState()
-        self.receive = ReceiveState()
+        self.receive  = ReceiveState()
 
 
 class ReceiveState:

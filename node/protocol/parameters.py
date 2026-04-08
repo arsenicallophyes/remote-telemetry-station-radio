@@ -42,6 +42,7 @@ class CommandParameters:
     @enum
     """
     NETWORK_JOIN      = ParametersType("NJ")
+    NETWORK_ACCEPT    = ParametersType("NA")
 
 
 # Function used to validate parameters must either return a value
@@ -118,9 +119,23 @@ def validate_network_join(args: "Tuple[Union[str, None], ...]") -> "Optional[byt
         return
 
     if len(network_id) != 4:
-        return None
+        return
 
     return network_id
+
+def validate_network_accept(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
+    seq = args[0]
+
+    if not seq:
+        return
+
+    if not seq.isdecimal():
+        return
+
+    try:
+        return int(seq)
+    except ValueError:
+        return
 
 PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.TIMESTAMP : {
@@ -141,6 +156,10 @@ COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
     CommandParameters.NETWORK_JOIN : {
         "argc" : 1,
         "validator": validate_network_join
+    },
+    CommandParameters.NETWORK_ACCEPT : {
+        "argc" : 1,
+        "validator": validate_network_accept
     },
 }
 

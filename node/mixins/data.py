@@ -61,7 +61,7 @@ class DataMixin(NodeState):
             now: Optional[float] = None,
         ) -> Optional[Set[int]]: ...
 
-        def control_transmit_ack(
+        def control_transmit_await_ack(
             self,
             packet: Packet,
             peer: Peer,
@@ -72,7 +72,7 @@ class DataMixin(NodeState):
             self,
             expected_parameter: ParametersType,
             listen_window: Optional[float] = None,
-        ) -> Optional[ParametersDict]: ...
+        ) -> Optional[Tuple[ParametersDict, NodeID]]: ...
 
         def control_send_NACK(
             self,
@@ -146,7 +146,7 @@ class DataMixin(NodeState):
             message,
         )
 
-        if not self.control_transmit_ack(control_packet, peer, now):
+        if not self.control_transmit_await_ack(control_packet, peer, now):
             print("Receiver unresponsive")
             return
 
@@ -184,13 +184,15 @@ class DataMixin(NodeState):
         now = monotonic() if now is None else now
         r = self.rfm9x
 
-        parameters = self.control_receive( # pylint: disable=assignment-from-no-return
+        response = self.control_receive( # pylint: disable=assignment-from-no-return
             Parameters.FREQUENCY_SWITCH,
             listen_window=float(self.wait_horizon_sec),
         )
 
-        if not parameters:
+        if not response:
             return
+
+        parameters, _ = response
 
         frequency, packet_time = parameters[Parameters.FREQUENCY_SWITCH]
 
