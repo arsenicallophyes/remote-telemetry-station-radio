@@ -32,6 +32,7 @@ class Packet:
     target: "Optional[NodeID]"
     p_type: "PacketKindType"
     message: "Optional[str]"
+    identifier: int
 
     def __init__(
             self,

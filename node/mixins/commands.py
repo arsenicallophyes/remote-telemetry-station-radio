@@ -6,7 +6,6 @@ from models.packet_type import PacketKind
 from models.model import NodeID, Identifier
 
 from node.protocol.parameters import CommandParameters, add_parameter, add_timestamp
-from node.transport.peer import Peer
 from node.transport.peer_table import PeerTable
 from node.transport.types.authorization_state import AuthorizationState
 
@@ -21,7 +20,8 @@ if TYPE_CHECKING:
     from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
     from models.model import SpreadingFactor, CodingRate, Frequency
-    from node.protocol.parameters import ParametersDict, ParametersType
+    from node.transport.peer import Peer
+    from node.protocol.parameters import ParametersDict
     from node.mac.band_airtime import BandAirtime
 
 
@@ -40,6 +40,7 @@ class CommandsMixin:
     bandwidth:         int
     ack_wait:          float
     peer_table:        PeerTable
+    etx_packets_count: int
 
     if TYPE_CHECKING:
         # pylint: disable=unused-argument
@@ -55,22 +56,48 @@ class CommandsMixin:
 
         def control_receive(
             self,
-            expected_parameter: ParametersType,
-            listen_window: Optional[float] = None,
-        ) -> Optional[Tuple[ParametersDict, NodeID]]: ...
+            deadline: float,
+        ) -> Optional[Tuple[ParametersDict, NodeID, Optional[Peer]]]: ...
 
         def control_transmit_await_ack(
             self,
             packet: Packet,
             peer: Peer,
-            now: "Optional[float]" = None,
-        ) -> "Optional[bool]": ...
-    
+            now: Optional[float] = None,
+        ) -> Optional[bool]: ...
+
+        def control_send_ack(
+            self,
+            target: NodeID,
+            peer: Optional[Peer] = None,
+        ) -> None: ...
+
         def acquire_channel(
             self,
             packet: Packet,
-            now: "Optional[float]" = None,
-        ) -> "Tuple[Frequency, BandAirtime, float]": ...
+            now: Optional[float] = None,
+        ) -> Tuple[Frequency, BandAirtime, float]: ...
+
+        def etx_receive(
+                self,
+                expected_source: NodeID,
+                listen_window: Optional[float],
+                now: Optional[float] = None,
+            ) -> None: ...
+
+        def etx_transmit(
+            self,
+            target: NodeID,
+            now: Optional[float] = None,
+        ) -> None: ...
+
+        def etx_complete(
+            self,
+            peer: Peer,
+            successfully_transmitted_packet: int,
+        ) -> None: ...
+        
+
 
 
     def network_join(
@@ -82,8 +109,7 @@ class CommandsMixin:
         r = self.rfm9x
 
         message = add_parameter(None, CommandParameters.NETWORK_JOIN, NETWORK_ID.decode()) #  pylint: disable=assignment-from-no-return
-        current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message)
+        message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(self.node_id, BROADCAST_ADDRESS, PacketKind.CONTROL, 0, message)
         self.acquire_channel(packet, now)
@@ -100,17 +126,14 @@ class CommandsMixin:
 
         while monotonic() < deadline:
 
-            response = self.control_receive( # pylint: disable=assignment-from-no-return
-                CommandParameters.NETWORK_ACCEPT,
-                listen_window=self.wait_horizon_sec,
-            )
+            response = self.control_receive(deadline) # pylint: disable=assignment-from-no-return
 
             if not response:
                 continue
 
-            parameters, source = response
+            parameters, source, _ = response
 
-            seq = parameters[CommandParameters.NETWORK_ACCEPT]
+            seq = parameters.get(CommandParameters.NETWORK_ACCEPT)
 
             if not isinstance(seq, int):
                 continue
@@ -140,8 +163,7 @@ class CommandsMixin:
             return
 
         message = add_parameter(None, CommandParameters.NETWORK_ACCEPT, str(peer.transmit.next_seq))
-        current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message)
+        message = add_timestamp(self.rtc.datetime, message)
 
 
         packet = Packet(
@@ -157,11 +179,10 @@ class CommandsMixin:
         if response:
             peer.state = AuthorizationState.REGISTERED
 
-    def network_rejoin(self, peer: Peer) -> None:
+    def network_rejoin(self, peer: "Peer") -> None:
 
         message = add_parameter(None, CommandParameters.NETWORK_REJOIN)
-        current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message)
+        message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(
             self.node_id,
@@ -172,3 +193,77 @@ class CommandsMixin:
         )
 
         self.control_transmit_await_ack(packet, peer) # pylint: disable=assignment-from-no-return
+
+    def benchmark_all_nodes_with_etx(self):
+        peers = self.peer_table.peers
+        for target, peer in peers.items():
+            tx_first = target < self.node_id
+            message = add_parameter(
+                None,
+                CommandParameters.START_ETX_RX if tx_first else CommandParameters.START_ETX_TX,
+            )
+            message = add_timestamp(self.rtc.datetime, message)
+            packet = Packet(
+                self.node_id,
+                peer.node_id,
+                PacketKind.CONTROL,
+                peer.transmit.next_seq,
+                message,
+            )
+            response = self.control_transmit_await_ack(packet, peer) # pylint: disable=assignment-from-no-return
+            if not response:
+                continue
+
+            self.start_etx(target, peer, tx_first)
+
+    def start_etx(self, target: NodeID, peer: "Peer", tx_first: bool):
+        now = monotonic()
+        if tx_first:
+            self.etx_transmit(target, now)
+            forwarded_packets = self.wait_for_etx_count(target, peer)
+            self.etx_receive(target, self.wait_horizon_sec) # pylint: disable=assignment-from-no-return
+            self.send_etx_count(peer)
+        else:
+            self.etx_receive(target, self.wait_horizon_sec) # pylint: disable=assignment-from-no-return
+            self.send_etx_count(peer)
+            self.etx_transmit(target, now)
+            forwarded_packets = self.wait_for_etx_count(target, peer)
+
+        if forwarded_packets:
+            self.etx_complete(peer, forwarded_packets)
+
+    def wait_for_etx_count(self, expected_source: NodeID, peer: "Peer") -> "Optional[int]":
+        deadline = monotonic() + float(self.wait_horizon_sec)
+
+        while monotonic() < deadline:
+            response = self.control_receive(deadline) # pylint: disable=assignment-from-no-return
+
+            if not response:
+                continue
+
+            parameters, source, _ = response
+
+            if source != expected_source:
+                continue
+
+            result = parameters.get(CommandParameters.ETX_COUNT)
+
+            if not isinstance(result, int):
+                continue
+
+            self.control_send_ack(source, peer)
+            return result
+
+    def send_etx_count(self, peer: "Peer"):
+        message = add_parameter(None, CommandParameters.ETX_COUNT, str(peer.etx_rx_count))
+        message = add_timestamp(self.rtc.datetime, message)
+
+        packet = Packet(
+            self.node_id,
+            peer.node_id,
+            PacketKind.CONTROL,
+            peer.transmit.next_seq,
+            message,
+        )
+
+        self.control_transmit_await_ack(packet, peer)

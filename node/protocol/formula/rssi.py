@@ -32,7 +32,7 @@ class RSSI:
         """
         if -130 < bound < 0:
             raise ValueError(f"{bound} dBm is not a valid value. RSSI values must be between 0 dBm and -130 dBm.")
-    
+
     @staticmethod
     def validate_weight(weight: float):
         """

@@ -1,7 +1,7 @@
 import random
 
 from models.model import Frequency
-from exceptions.regulations.unknown_band_error import UnkownBandError
+from exceptions.regulations.unknown_band_error import UnknownBandError
 
 CHANNELS = {
     'K': {
@@ -59,7 +59,7 @@ class ChannelSelect:
         channels = CHANNELS.get(band_name, {}).get("Channels")
 
         if channels is None:
-            raise UnkownBandError(band_name, tuple(CHANNELS.keys()))
+            raise UnknownBandError(band_name, tuple(CHANNELS.keys()))
 
         index = random.randint(0, len(channels) - 1)
 

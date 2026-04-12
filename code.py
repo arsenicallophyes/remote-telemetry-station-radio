@@ -23,7 +23,7 @@ if TRANSMIT:
     target = 1
     node = Node("Base", source, 869.8, BANDS)
 
-    node.peer_table.add_peer(NodeID(target))
+    # node.peer_table.add_peer(NodeID(target))
     packet = Packet(
         source, NodeID(target), PacketKind.DATA, 0, "Hello World."
     )
@@ -38,6 +38,6 @@ if RECEIVE:
     source = 1
     target = 0
     node = Node("A", source, 869.8, BANDS)
-    node.peer_table.add_peer(NodeID(target))
+    # node.peer_table.add_peer(NodeID(target))
     while True:
-        node.data_receive()
+        node.main()

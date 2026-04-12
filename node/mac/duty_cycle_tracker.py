@@ -4,7 +4,7 @@ Define Duty Cycle Tracker class
 from node.mac.band_airtime import BandAirtime
 
 from regulations.duty_cycles import DutyCyclesType
-from exceptions.regulations.unknown_band_error import UnkownBandError
+from exceptions.regulations.unknown_band_error import UnknownBandError
 from exceptions.regulations.duty_cycle_exceeded_error import DutyCycleExceededError
 try:
     from typing import TYPE_CHECKING
@@ -31,7 +31,7 @@ class DutyCycleTracker:
 
         if band_airtime is None:
             registered_bands = tuple(self.bands_airtime.keys())
-            raise UnkownBandError(band_name, registered_bands)
+            raise UnknownBandError(band_name, registered_bands)
 
         self.__validate_airtime(packet_time, band_airtime)
 

@@ -4,7 +4,7 @@ from node.mixins.state import NodeState
 from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.recovery_state import RecoveryState
-from node.storage.persistance_manager import PersistenceManager
+from node.storage.persistence_manager import PersistenceManager
 from node.protocol.parameters import Parameters, add_parameter, add_timestamp
 from node.transport.types.authorization_state import AuthorizationState
 
@@ -30,8 +30,6 @@ if TYPE_CHECKING:
     from node.mac.band_airtime import BandAirtime
 
     from node.transport.peer import Peer
-
-    from node.protocol.parameters import ParametersDict, ParametersType
 
     from models.model import SpreadingFactor, CodingRate, Message, Identifier, Frequency
     from models.packet_type import PacketKindType
@@ -71,12 +69,6 @@ class DataMixin(NodeState):
             peer: Peer,
             now: Optional[float] = None,
         ) -> Optional[bool]: ...
-
-        def control_receive(
-            self,
-            expected_parameter: ParametersType,
-            listen_window: Optional[float] = None,
-        ) -> Optional[Tuple[ParametersDict, NodeID]]: ...
 
         def control_send_NACK(
             self,
@@ -192,27 +184,14 @@ class DataMixin(NodeState):
 
     def data_receive(
             self,
+            frequency: float,
+            packet_time: float,
             recovery_source: "Optional[NodeID]" = None,
             now: "Optional[float]" = None,
         ) -> "Optional[str]":
 
         now = monotonic() if now is None else now
         r = self.rfm9x
-
-        response = self.control_receive( # pylint: disable=assignment-from-no-return
-            Parameters.FREQUENCY_SWITCH,
-            listen_window=float(self.wait_horizon_sec),
-        )
-
-        if not response:
-            return
-
-        parameters, _ = response
-
-        frequency, packet_time = parameters[Parameters.FREQUENCY_SWITCH]
-
-        if not (isinstance(frequency, float) and isinstance(packet_time, float)):
-            return
 
         r.frequency_mhz = frequency
         timeout = 2 * packet_time + self.ack_wait

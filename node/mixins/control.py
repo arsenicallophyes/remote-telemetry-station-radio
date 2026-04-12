@@ -7,8 +7,8 @@ from node.transport.peer import Peer
 from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.retransmit_state import RetransmitState
-from node.storage.persistance_manager import PersistenceManager
-from node.protocol.parameters import validate_parameters, Parameters, ParametersType, CommandParameters
+from node.storage.persistence_manager import PersistenceManager
+from node.protocol.parameters import validate_parameters, Parameters
 
 from models.packet import Packet
 from models.model import NodeID
@@ -42,7 +42,7 @@ class ControlMixin(NodeState):
 
     ack_wait:                    float
     control_frequency:           float
-    control_transmition_retries: int
+    control_transmission_retries : int
     control_band:                "Band"
     spreading_factor:            "SpreadingFactor"
     bandwidth:                   int
@@ -101,10 +101,11 @@ class ControlMixin(NodeState):
             True,
         )
 
-        r.frequency_mhz = self.control_frequency
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
         n = 0
-        while n < self.control_transmition_retries:
+        while n < self.control_transmission_retries :
             n += 1
             self.acquire_channel(packet, now)
             r.send(
@@ -121,8 +122,11 @@ class ControlMixin(NodeState):
                 sleep(self.ack_wait + self.ack_wait * random.random())
                 continue
 
-            message, _, _, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
+            message, source, _, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
             message = str(message)
+
+            if peer.node_id != source:
+                continue
 
             if packet_kind != PacketKind.ACK:
                 print("Ignoring packet", f"{message=}")
@@ -157,10 +161,11 @@ class ControlMixin(NodeState):
             True,
         )
 
-        r.frequency_mhz = self.control_frequency
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
         n = 0
-        while n < self.control_transmition_retries:
+        while n < self.control_transmission_retries :
             n += 1
             self.acquire_channel(packet, now)
             r.send(
@@ -197,11 +202,11 @@ class ControlMixin(NodeState):
 
     def control_receive(
         self,
-        expected_parameter: "Optional[ParametersType]" = None,
-        listen_window: "Optional[float]" = None,
-    ) -> "Optional[Tuple[ParametersDict, NodeID]]":
+        deadline: float,
+    ) -> "Optional[Tuple[ParametersDict, NodeID, Optional[Peer]]]":
         r = self.rfm9x
-        r.frequency_mhz = self.control_frequency
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
         self.apply_link_profile(
             self.spreading_factor,
@@ -210,7 +215,6 @@ class ControlMixin(NodeState):
             self.control_band.erp,
             True,
         )
-        deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
         while monotonic() < deadline:
 
             packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
@@ -239,56 +243,37 @@ class ControlMixin(NodeState):
             peer = self.peer_table.get_peer(source)
 
             if not peer:
-                network_id = parameters.get(CommandParameters.NETWORK_JOIN)
-                if network_id and isinstance(network_id, bytes):
-                    self.network_accept(network_id, source) # pylint: disable=assignment-from-no-return
-                    return
+                return parameters, source, None
 
-                if expected_parameter == CommandParameters.NETWORK_ACCEPT:
-                    network_accept_sequence = parameters.get(CommandParameters.NETWORK_ACCEPT)
-                    if network_accept_sequence and isinstance(network_accept_sequence, int):
-                        ack_packet = Packet(self.node_id, source, PacketKind.ACK, 0, ACK_MESSAGE)
-                        self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
-                        r.send(
-                            ack_packet.to_byte(),
-                            destination=ack_packet.target,
-                            node=ack_packet.source,
-                            identifier=ack_packet.identifier,
-                            flags=ack_packet.p_type
-                        )
-                        return parameters, source
+            return parameters, source, peer
 
-                print(f"Unregistered peer: {source=}: {message}")
-                continue
+    def control_send_ack(self, target: NodeID, peer: "Optional[Peer]" = None) -> None:
+        r = self.rfm9x
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
-            if parameters.get(CommandParameters.NETWORK_REJOIN):
-                # Return parameter, don't ack, runtime
-                # code checks for NETWORK_REJOIN and calls network_join
-                return parameters, source
+        ack_packet = Packet(
+            self.node_id,
+            target,
+            PacketKind.ACK,
+            0,
+            ACK_MESSAGE,
+        )
 
-            ack_packet = Packet(
-                self.node_id,
-                source,
-                PacketKind.ACK,
-                peer.transmit.next_seq,
-                ACK_MESSAGE,
-            )
+        if peer:
+            ack_packet.identifier = peer.transmit.next_seq
 
-            if expected_parameter and not parameters.get(expected_parameter):
-                continue
+        self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
+        r.send(
+            ack_packet.to_byte(),
+            destination=ack_packet.target,
+            node=ack_packet.source,
+            identifier=ack_packet.identifier,
+            flags=ack_packet.p_type
+        )
 
-            self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
-            r.send(
-                ack_packet.to_byte(),
-                destination=ack_packet.target,
-                node=ack_packet.source,
-                identifier=ack_packet.identifier,
-                flags=ack_packet.p_type
-            )
-
+        if peer:
             peer.transmit.increment_sequence()
-
-            return parameters, source
 
 
     def control_send_NACK(

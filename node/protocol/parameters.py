@@ -32,7 +32,6 @@ class Parameters:
     """
     TIMESTAMP        = ParametersType("TS")
     FREQUENCY_SWITCH = ParametersType("FS")
-    ETX_COUNT        = ParametersType("EC")
 
 class CommandParameters:
     """
@@ -41,6 +40,9 @@ class CommandParameters:
     NETWORK_JOIN      = ParametersType("NJ")
     NETWORK_ACCEPT    = ParametersType("NA")
     NETWORK_REJOIN    = ParametersType("RJ")
+    START_ETX_TX      = ParametersType("ET")
+    START_ETX_RX      = ParametersType("ER")
+    ETX_COUNT         = ParametersType("EC")
 
 
 # Function used to validate parameters must either return a value
@@ -144,10 +146,6 @@ PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
         "argc": 2,
         "validator" : validate_frequency_switch
     },
-    Parameters.ETX_COUNT: {
-        "argc": 1,
-        "validator": validate_etx_count
-    }
 }
 
 COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
@@ -160,6 +158,18 @@ COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
         "validator": validate_network_accept
     },
     CommandParameters.NETWORK_REJOIN: {
+        "argc": 1,
+        "validator": lambda x: True
+    },
+    CommandParameters.ETX_COUNT: {
+        "argc": 1,
+        "validator": validate_etx_count
+    },
+    CommandParameters.START_ETX_TX: {
+        "argc": 1,
+        "validator": lambda x: True
+    },
+    CommandParameters.START_ETX_RX: {
         "argc": 1,
         "validator": lambda x: True
     }
@@ -230,7 +240,7 @@ def add_parameter(
     return Message(field)
 
 
-def add_timestamp(now: struct_time, message: Message) -> str:
+def add_timestamp(now: struct_time, message: Message) -> Message:
     timestamp = (
         f"{now.tm_year:04}"
         f"{now.tm_mon:02}"

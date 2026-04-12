@@ -1,10 +1,9 @@
 from time import monotonic, sleep
 
-from node.transport.peer_table import PeerTable
-from node.protocol.parameters import Parameters
+from node.protocol.formula.etx import ETX
 
 from models.packet import Packet
-from models.packet_type import PacketKind, PacketKindType
+from models.packet_type import PacketKind
 from models.model import NodeID
 
 try:
@@ -17,18 +16,20 @@ if TYPE_CHECKING:
     from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
     from node.transport.peer import Peer
+    from node.transport.peer_table import PeerTable
     from models.model import SpreadingFactor, CodingRate, Message, Identifier
+    from models.packet_type import PacketKindType
     from regulations.types.model import Band
-    from node.protocol.parameters import ParametersDict, ParametersType
+
 
 ETX_MESSAGE = 0
 
 class EtxMixin:
     rfm9x: "RFM9x"
     node_id: int
-    peer_table: PeerTable
+    peer_table: "PeerTable"
 
-    etx_packets_count = 20
+    etx_packets_count: int = 20
     spreading_factor: "SpreadingFactor"
     bandwidth: int
     coding_rate: "CodingRate"
@@ -48,11 +49,10 @@ class EtxMixin:
             preamble: int = 8,
         ) -> None: ...
 
-        def control_receive(
-            self,
-            expected_parameter: ParametersType,
-            listen_window: Optional[float] = None,
-        ) -> Optional[Tuple[ParametersDict, NodeID]]:...
+        def decode_packet(
+                self,
+                packet_bytes: bytearray,
+            ) -> Tuple[Message, NodeID, Identifier, PacketKindType]: ...
 
         def control_transmit_await_ack(
             self,
@@ -61,16 +61,11 @@ class EtxMixin:
             now: Optional[float] = None,
         ) -> Optional[bool]: ...
 
-        def decode_packet(
-                self,
-                packet_bytes: bytearray,
-            ) -> Tuple[Message, NodeID, Identifier, PacketKindType]: ...
-
     def etx_transmit(
         self,
-        target: "NodeID",
+        target: NodeID,
         now: "Optional[float]" = None,
-    ) -> "Optional[int]":
+    ) -> None:
         now = monotonic() if now is None else now
         r = self.rfm9x
 
@@ -95,28 +90,24 @@ class EtxMixin:
             )
             sleep(0.25)
 
-        response = self.control_receive( # pylint: disable=assignment-from-no-return
-            Parameters.ETX_COUNT,
-            listen_window=self.wait_horizon_sec,
+    def etx_complete(self, peer: "Peer", successfully_transmitted_packet: int) -> None:
+        if not peer.etx_rx_count:
+            return
+
+        etx_score = ETX.calculate_etx(
+            self.etx_packets_count,
+            peer.etx_rx_count,
+            successfully_transmitted_packet,
         )
-        if not response:
-            return
 
-        parameters, _ = response
-
-        received_packets = parameters[Parameters.ETX_COUNT]
-
-        if not isinstance(received_packets, int):
-            return
-
-        return received_packets
+        peer.etx_score    = etx_score
 
     def etx_receive(
             self,
-            expected_source: "NodeID",
+            expected_source: NodeID,
             listen_window: "Optional[float]",
             now: "Optional[float]" = None,
-        ) -> "Optional[int]":
+        ) -> None:
         now = monotonic() if now is None else now
         r = self.rfm9x
 
@@ -136,6 +127,7 @@ class EtxMixin:
             return
 
         n = 0
+        rssi_avg = 0
         last_received = None
         deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
 
@@ -156,16 +148,11 @@ class EtxMixin:
             if message != str(ETX_MESSAGE):
                 continue
 
+            rssi_avg += r.last_rssi
             n += 1
             last_received = identifier
             if last_received >= self.etx_packets_count:
                 break
 
-        packet = Packet(self.node_id, expected_source, PacketKind.CONTROL, 0, f"ET:{n}")
-
-        response = self.control_transmit_await_ack(packet, peer, now) # pylint: disable=assignment-from-no-return
-
-        if not response:
-            return
-
-        return n
+        peer.etx_rx_count = n
+        peer.rssi_average = rssi_avg / n if n != 0 else None

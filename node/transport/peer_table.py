@@ -29,7 +29,7 @@ class PeerTable:
 
         if peer is None:
             peer = Peer(node_id, state)
-            if sequence:
+            if sequence is not None:
                 peer.receive.set_sequence(sequence)
             self.peers[node_id] = peer
 

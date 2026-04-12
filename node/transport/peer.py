@@ -22,13 +22,23 @@ class Peer:
         "state",
         "transmit",
         "receive",
+        "etx_score",
+        "etx_rx_count",
+        "rssi_average",
     )
 
     def __init__(self, node_id: NodeID, state: AuthorizationStateType) -> None:
         self.node_id = node_id
         self.state   = state
+
         self.transmit = TransmitState()
         self.receive  = ReceiveState()
+
+        self.etx_score:    "Optional[float]" = None
+        self.etx_rx_count: "Optional[int]"   = None
+
+        self.rssi_average: "Optional[float]" = None
+
 
 
 class ReceiveState:

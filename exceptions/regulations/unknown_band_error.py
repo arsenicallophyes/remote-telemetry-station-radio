@@ -11,7 +11,7 @@ except ImportError:
 if TYPE_CHECKING:
     from typing import Tuple
 
-class UnkownBandError(RegulationError):
+class UnknownBandError(RegulationError):
     """
     Raised when the band provided is not registered.
     """

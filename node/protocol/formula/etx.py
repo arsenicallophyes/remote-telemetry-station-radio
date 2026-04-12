@@ -24,7 +24,8 @@ class ETX:
         if not 0.0 < weight <= 1.0:
             raise ValueError(f"{weight*100}% is not a valid weight. Weight must be higher than 0 and lower than 1.")
 
-    def calculate_etx(self, packets: int, recv_trans: int, forw_trans: int):
+    @staticmethod
+    def calculate_etx(packets: int, recv_trans: int, forw_trans: int):
         """
         Calculate expected transmission count.
         """
@@ -55,5 +56,5 @@ class ETX:
         """
         Return the weighted cost of ETX.
         """
-        etx = self.calculate_etx(packets, recv_trans, forw_trans)
+        etx = ETX.calculate_etx(packets, recv_trans, forw_trans)
         return self.weight * etx
