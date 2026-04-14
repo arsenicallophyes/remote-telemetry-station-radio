@@ -61,6 +61,11 @@ class EtxMixin:
             now: Optional[float] = None,
         ) -> Optional[bool]: ...
 
+        def send_packet(
+            self,
+            packet: Packet,
+        ) -> None: ...
+
     def etx_transmit(
         self,
         target: NodeID,
@@ -76,18 +81,13 @@ class EtxMixin:
             self.control_band.erp,
             True,
         )
-
-        r.frequency_mhz = self.control_frequency
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
         packet = Packet(self.node_id, target, PacketKind.CONTROL, 0, str(ETX_MESSAGE))
         for i in range(self.etx_packets_count):
-            r.send(
-                packet.to_byte(),
-                destination=packet.target,
-                node=packet.source,
-                identifier=i,
-                flags=packet.p_type
-            )
+            packet.identifier = i
+            self.send_packet(packet)
             sleep(0.25)
 
     def etx_complete(self, peer: "Peer", successfully_transmitted_packet: int) -> None:
@@ -101,6 +101,7 @@ class EtxMixin:
         )
 
         peer.etx_score    = etx_score
+        print(f"Peer ID: {peer.node_id} -> {etx_score=}")
 
     def etx_receive(
             self,
@@ -119,7 +120,8 @@ class EtxMixin:
             True,
         )
 
-        r.frequency_mhz = self.control_frequency
+        if round(r.frequency_mhz, 1) != self.control_frequency:
+            r.frequency_mhz = self.control_frequency
 
         peer = self.peer_table.get_peer(expected_source)
 

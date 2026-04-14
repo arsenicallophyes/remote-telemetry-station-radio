@@ -64,17 +64,16 @@ class PeerTable:
         delta = peer.receive.seq_delta(seq, expected)
 
         if delta == 0:
-            print("success", seq)
             peer.receive.increment_sequence()
             return SequenceResponse.SUCCESS
 
         if 0 < delta < HALF:
-            print("logging and sending nack", seq)
+            print(f"\nExpected Receive ID:{expected} got {seq=}")
             peer.receive.missed_packets = tuple((expected + i) % MAX_SEQ for i in range(delta))
 
             return SequenceResponse.AHEAD
 
-        print("discarding", seq)
+        print("Discarding duplicate", seq)
         return SequenceResponse.DUPLICATE
 
     def handle_sequence_recovery(

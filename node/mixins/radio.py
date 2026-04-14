@@ -1,4 +1,5 @@
 from time import struct_time, sleep, monotonic
+from math import log
 
 import rtc # pyright: ignore[reportMissingModuleSource] # pylint: disable=import-error
 import board
@@ -59,7 +60,7 @@ class RadioMixin:
         self.rtc = rtc.RTC()
         # Year, Month, Day, Hour, Minute, Second
         # Day of week, day of year, daylight saving flag: Last 3 fields ignored
-        self.rtc.datetime = struct_time((2026, 3, 1, 12, 40, 10, 0, 0, -1))
+        self.rtc.datetime = struct_time((2026, 1, 1, 0, 0, 0, 0, 0, -1))
 
     def __init_radio__(self, freq: float, bands: BandsSeq) -> None:
         """
@@ -94,7 +95,7 @@ class RadioMixin:
         r.spreading_factor = sf
         r.signal_bandwidth = bw
         r.coding_rate = cr
-        r.tx_power = tx_power_dbm
+        r.tx_power = round(10 * log(tx_power_dbm, 10))
         r.enable_crc = crc
         r.preamble_length = preamble
 
@@ -139,3 +140,13 @@ class RadioMixin:
         frequency = self.channels.select_channel(band.name)
 
         return frequency, band, packet_time
+
+    def send_packet(self, packet: Packet) -> None:
+        r = self.rfm9x
+        r.send(
+            packet.to_byte(),
+            destination=packet.target,
+            node=packet.source,
+            identifier=packet.identifier,
+            flags=packet.p_type
+        )

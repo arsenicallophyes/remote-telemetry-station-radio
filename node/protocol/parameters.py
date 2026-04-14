@@ -24,7 +24,7 @@ else:
 class Separator:
     FIELD = ";"
     KEY_VALUE = "="
-    ARGS = ","
+    ARGS = "|"
 
 class Parameters:
     """
@@ -32,6 +32,7 @@ class Parameters:
     """
     TIMESTAMP        = ParametersType("TS")
     FREQUENCY_SWITCH = ParametersType("FS")
+    DATA             = ParametersType("DT")
 
 class CommandParameters:
     """
@@ -98,7 +99,7 @@ def validate_etx_count(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
     if not etx_count:
         return
 
-    if not etx_count.isdecimal():
+    if not etx_count.isdigit():
         return
 
     try:
@@ -129,13 +130,21 @@ def validate_network_accept(args: "Tuple[Union[str, None], ...]") -> "Optional[i
     if not seq:
         return
 
-    if not seq.isdecimal():
+    if not seq.isdigit():
         return
 
     try:
         return int(seq)
     except ValueError:
         return
+
+def validate_data(args: "Tuple[Union[str, None], ...]") -> "Optional[str]":
+    data = args[0]
+
+    if not data:
+        return
+
+    return data
 
 PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.TIMESTAMP : {
@@ -145,6 +154,10 @@ PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.FREQUENCY_SWITCH : {
         "argc": 2,
         "validator" : validate_frequency_switch
+    },
+    Parameters.DATA : {
+        "argc": 1,
+        "validator" : validate_data
     },
 }
 

@@ -78,10 +78,15 @@ class TransmitState:
 
     __slots__ = (
         "next_seq",
+        "next_data_seq",
     )
 
     def __init__(self) -> None:
         self.next_seq = 0
+        self.next_data_seq = 0
 
     def increment_sequence(self) -> None:
         self.next_seq = (self.next_seq + 1) % MAX_SEQ
+
+    def increment_data_sequence(self) -> None:
+        self.next_data_seq = (self.next_data_seq + 1) % MAX_SEQ

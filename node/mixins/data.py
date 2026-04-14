@@ -1,4 +1,4 @@
-from time import monotonic
+from time import monotonic, sleep
 
 from node.mixins.state import NodeState
 from node.transport.peer_table import PeerTable
@@ -10,7 +10,7 @@ from node.transport.types.authorization_state import AuthorizationState
 
 from models.packet import Packet
 from models.packet_type import PacketKind
-from models.model import NodeID
+from models.model import NodeID, Frequency
 
 try:
     from typing import TYPE_CHECKING
@@ -31,8 +31,10 @@ if TYPE_CHECKING:
 
     from node.transport.peer import Peer
 
-    from models.model import SpreadingFactor, CodingRate, Message, Identifier, Frequency
+    from models.model import SpreadingFactor, CodingRate, Message, Identifier
     from models.packet_type import PacketKindType
+
+    from node.protocol.parameters import ParametersDict
 
 
 
@@ -52,6 +54,7 @@ class DataMixin(NodeState):
     coding_rate:             "CodingRate"
     spreading_factor:        "SpreadingFactor"
     wait_horizon_sec:        "WaitTime"
+    dropped  = False
 
 
     if TYPE_CHECKING:
@@ -80,6 +83,24 @@ class DataMixin(NodeState):
             self,
             expected_source: NodeID,
             now: Optional[float] = None,
+        ) -> None: ...
+
+        def control_send_ack(
+            self,
+            target: NodeID,
+            peer: Optional[Peer] = None,
+        ) -> None: ...
+
+        def control_receive(
+            self,
+            deadline: float,
+            timeout: Optional[float] = None,
+            packet_kind: PacketKindType = PacketKind.CONTROL,
+        ) -> Optional[Tuple[ParametersDict, NodeID, Identifier, Optional[Peer]]]: ...
+
+        def send_packet(
+            self,
+            packet: Packet,
         ) -> None: ...
 
         def apply_link_profile(
@@ -142,8 +163,7 @@ class DataMixin(NodeState):
         frequency, band, packet_time = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
         arguments = str(frequency), str(packet_time)
         message = add_parameter(None, Parameters.FREQUENCY_SWITCH, *arguments)
-        current_time = self.rtc.datetime
-        message = add_timestamp(current_time, message)
+        message = add_timestamp(self.rtc.datetime, message)
 
         control_packet = Packet(
             self.node_id,
@@ -156,63 +176,75 @@ class DataMixin(NodeState):
         if not self.control_transmit_await_ack(control_packet, peer, now):
             print("Receiver unresponsive")
             return
-
+        
+        print("Base switched frequency")
         r.frequency_mhz = frequency
 
-        self.apply_link_profile( # pylint: disable=assignment-from-no-return
+        self.apply_link_profile(
             self.spreading_factor,
             self.bandwidth,
             self.coding_rate,
             25,
             True,
         )
+        sleep(self.ack_wait)
+        if packet.identifier == 2 and not self.dropped:
+            print(f"Dropping packet ID:2, {packet.message}")
+            r.frequency_mhz = self.control_frequency
+            self.dropped = True
+            peer.transmit.increment_data_sequence()
+            return
 
-        r.send(
-            packet.to_byte(),
-            destination=packet.target,
-            node=packet.source,
-            identifier=peer.transmit.next_seq,
-            flags=packet.p_type,
-        )
-        peer.transmit.increment_sequence()
+        self.send_packet(packet)
+        if not self.retransmit:
+            peer.transmit.increment_data_sequence()
         self.dc_tracker.commit_airtime(band.name, packet_time)
 
         r.frequency_mhz = self.control_frequency
 
         if not self.retransmit:
             self.control_listen_NACK(packet.target, now)
+        else:
+            print("Done with retansmitting")
 
     def data_receive(
             self,
-            frequency: float,
+            frequency: Frequency,
             packet_time: float,
             recovery_source: "Optional[NodeID]" = None,
             now: "Optional[float]" = None,
-        ) -> "Optional[str]":
-
+        ) -> None:
         now = monotonic() if now is None else now
         r = self.rfm9x
 
         r.frequency_mhz = frequency
+        self.apply_link_profile(
+            self.spreading_factor,
+            self.bandwidth,
+            self.coding_rate,
+            25,
+            True,
+        )
         timeout = 2 * packet_time + self.ack_wait
+        print(f"Switched to {round(r.frequency_mhz, 1)} MHz, {timeout=}")
 
         try:
+            deadline = monotonic() + timeout + 1
+            response = self.control_receive(deadline, timeout, PacketKind.DATA) # pylint: disable=assignment-from-no-return
 
-            packet_bytes = r.receive(with_header=True, timeout=timeout)
-
-            if packet_bytes is None:
+            if not response:
+                print("Timed out")
                 return
 
-            message, source, identifier, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
+            parameters, source, identifier, _ = response
+
+            data = parameters.get(Parameters.DATA)
+            if not isinstance(data, str):
+                print("Invalid Data")
+                return
 
             if recovery_source and recovery_source != source:
-                return
-
-            if packet_kind != PacketKind.DATA:
-                return
-
-            timestamp = self.extract_timestamp(message) # pylint: disable=assignment-from-no-return
-            if not timestamp:
+                print("Unexpected Source")
                 return
 
             if not self.recovery:
@@ -225,9 +257,11 @@ class DataMixin(NodeState):
                 )
 
                 if response == SequenceResponse.ABORT:
+                    print("Aborting Recovery")
                     return
 
             if response == SequenceResponse.UNREGISTERED:
+                print("Unregistered")
                 return
 
             peer = self.peer_table.get_peer(source)
@@ -235,16 +269,18 @@ class DataMixin(NodeState):
                 return
 
             if response == SequenceResponse.PENDING:
+                print("Node is pending registration")
                 self.network_rejoin(peer)
                 return
 
             if response == SequenceResponse.DUPLICATE:
                 self.log_peer_activity(peer, identifier)
+                print("Duplicate packet")
                 return
 
             if response == SequenceResponse.SUCCESS:
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {message=}:{timestamp=}")
+                print(f"Saving -> {data=}")
 
             if response == SequenceResponse.AHEAD:
                 nack_response = self.control_send_NACK(source, now) # pylint: disable=assignment-from-no-return
@@ -255,10 +291,8 @@ class DataMixin(NodeState):
                     else:
                         self.recovery = RecoveryState(source, nack_response, identifier)
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {message=}:{timestamp=}")
+                print(f"Saving -> {data=}")
 
-            print(f"{message=}")
-            return message
         finally:
             r.frequency_mhz = self.control_frequency
 
@@ -270,28 +304,47 @@ class DataMixin(NodeState):
 
         source = self.recovery.source
         deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
+        while self.recovery.queued_packets and monotonic() < deadline:
+            response = self.control_receive(deadline) # pylint: disable=assignment-from-no-return
+            if not response:
+                continue
+            parameters, rx_source, _, peer = response
+            if rx_source != source:
+                continue
 
-        while self.recovery.queued_packets:
-            self.data_receive(source, now)
-            if monotonic() > deadline:
-                break
+            if result := parameters.get(Parameters.FREQUENCY_SWITCH):
+                frequency, packet_time = result
+                if not (isinstance(frequency, float) and isinstance(packet_time, float)):
+                    return
+                frequency = Frequency(frequency)
+                self.control_send_ack(source)
+                self.data_receive(frequency, packet_time, now=now)
+
 
         if not self.recovery.queued_packets:
             peer = self.peer_table.get_peer(source)
 
             if not peer:
+                self.recovery = None
                 return
 
             peer.receive.complete_recovery(self.recovery.ahead_seq)
+        else:
+            peer = self.peer_table.get_peer(source)
+            if peer:
+                print(f"Recovery failed: {self.recovery.queued_packets} unrecovered. Advancing sequence.")
+                peer.receive.complete_recovery(self.recovery.ahead_seq)
 
         self.recovery = None
 
-    def data_retransmission(self, now: "Optional[float]" = None):
+    def data_retransmission(self):
         if not self.retransmit:
             return
-        now = monotonic() if now is None else now
+        
 
         for packet in self.retransmit.queued_packets:
+            now = monotonic()
             self.data_transmit(packet, now)
+            sleep(0.15)
 
         self.retransmit = None

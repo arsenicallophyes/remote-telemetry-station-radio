@@ -49,8 +49,8 @@ class ETX:
 
     @staticmethod
     def validate_transmission_packets(packets: int, packet_trans: int):
-        if packet_trans < packets:
-            raise ValueError(f"{packet_trans} is not valid. Number of packets retansmissted must be equal or greater than {packets=}.")
+        if packet_trans > packets:
+            raise ValueError(f"Number of {packet_trans=} is not valid. Number of packets retansmissted must not greater than {packets=}.")
 
     def get_cost(self, packets: int, recv_trans: int, forw_trans: int):
         """

@@ -17,9 +17,9 @@ except ImportError:
 if TYPE_CHECKING:
     from typing import Optional, Tuple
     from rtc import RTC # pyright: ignore[reportMissingModuleSource] # pylint: disable=import-error
-    from adafruit_rfm9x_patched import RFM9x
     from node.mac.band_airtime import WaitTime
     from models.model import SpreadingFactor, CodingRate, Frequency
+    from models.packet_type import PacketKindType
     from node.transport.peer import Peer
     from node.protocol.parameters import ParametersDict
     from node.mac.band_airtime import BandAirtime
@@ -30,7 +30,6 @@ BROADCAST_ADDRESS = NodeID(255)
 NETWORK_ID = b"\x0E\x1F\x7D\x2C"
 
 class CommandsMixin:
-    rfm9x:   "RFM9x"
     node_id: int
     rtc:     "RTC"
 
@@ -41,6 +40,8 @@ class CommandsMixin:
     ack_wait:          float
     peer_table:        PeerTable
     etx_packets_count: int
+
+    control_transmission_retries : int
 
     if TYPE_CHECKING:
         # pylint: disable=unused-argument
@@ -57,7 +58,9 @@ class CommandsMixin:
         def control_receive(
             self,
             deadline: float,
-        ) -> Optional[Tuple[ParametersDict, NodeID, Optional[Peer]]]: ...
+            timeout: Optional[float] = None,
+            packet_kind: PacketKindType = PacketKind.CONTROL,
+        ) -> Optional[Tuple[ParametersDict, NodeID, Identifier, Optional[Peer]]]: ...
 
         def control_transmit_await_ack(
             self,
@@ -77,6 +80,11 @@ class CommandsMixin:
             packet: Packet,
             now: Optional[float] = None,
         ) -> Tuple[Frequency, BandAirtime, float]: ...
+
+        def send_packet(
+            self,
+            packet: Packet,
+        ) -> None: ...
 
         def etx_receive(
                 self,
@@ -106,60 +114,71 @@ class CommandsMixin:
         now: "Optional[float]" = None,
     ) -> None:
         now = monotonic() if now is None else now
-        r = self.rfm9x
 
-        message = add_parameter(None, CommandParameters.NETWORK_JOIN, NETWORK_ID.decode()) #  pylint: disable=assignment-from-no-return
+        message = add_parameter(None, CommandParameters.NETWORK_JOIN, NETWORK_ID.hex()) #  pylint: disable=assignment-from-no-return
         message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(self.node_id, BROADCAST_ADDRESS, PacketKind.CONTROL, 0, message)
-        self.acquire_channel(packet, now)
-        r.send(
-            packet.to_byte(),
-            destination=packet.target,
-            node=packet.source,
-            identifier=packet.identifier,
-            flags=packet.p_type
-        )
-        sleep(0.4)
 
-        deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
+        overall_deadline = monotonic() + (listen_window if listen_window else float(self.wait_horizon_sec))
+        max_attempts = self.control_transmission_retries
+        attempt = 0
 
-        while monotonic() < deadline:
+        while attempt < max_attempts and monotonic() < overall_deadline:
+            self.acquire_channel(packet, now)
+            self.send_packet(packet)
+            sleep(0.4)
 
-            response = self.control_receive(deadline) # pylint: disable=assignment-from-no-return
+            attempt_deadline  = min(monotonic() + self.ack_wait * 4, overall_deadline)
 
-            if not response:
-                continue
+            while monotonic() < attempt_deadline :
 
-            parameters, source, _ = response
+                response = self.control_receive(attempt_deadline ) # pylint: disable=assignment-from-no-return
 
-            seq = parameters.get(CommandParameters.NETWORK_ACCEPT)
+                if not response:
+                    continue
 
-            if not isinstance(seq, int):
-                continue
+                parameters, source, *_ = response
 
-            seq = Identifier(seq)
+                seq = parameters.get(CommandParameters.NETWORK_ACCEPT)
 
-            self.peer_table.add_peer(source, AuthorizationState.REGISTERED, seq)
+                if not isinstance(seq, int):
+                    continue
 
+                seq = Identifier(seq)
+
+                if self.peer_table.add_peer(source, AuthorizationState.REGISTERED, seq):
+                    print(f"Added {source=} REGISTERED")
+
+                peer = self.peer_table.get_peer(source)
+                if not peer:
+                    return
+
+                self.control_send_ack(source, peer)
+
+            sleep(self.ack_wait + self.ack_wait * random.random())
 
     def network_accept(self, network_id: bytes, source: NodeID) -> None:
         if network_id != NETWORK_ID:
+            print("Invalid Network ID")
             return
 
         peer = self.peer_table.get_peer(source)
 
         if peer and peer.state == AuthorizationState.REGISTERED:
+            print(f"Peer={peer.node_id} already registered.")
             return
 
         # Random sleep from 0.6 to 2.0s to prevent collision
         n = random.randint(1, 15) / 10 + self.ack_wait
         sleep(n)
 
-        self.peer_table.add_peer(source, AuthorizationState.PENDING)
+        if self.peer_table.add_peer(source, AuthorizationState.PENDING):
+            print(f"Added {source=} PENDING")
 
         peer = self.peer_table.get_peer(source)
         if not peer:
+            print(f"Peer {source=} does not exists")
             return
 
         message = add_parameter(None, CommandParameters.NETWORK_ACCEPT, str(peer.transmit.next_seq))
@@ -173,11 +192,14 @@ class CommandsMixin:
             peer.transmit.next_seq,
             message,
         )
-
+        print("Awaiting network accept confirmation")
         response = self.control_transmit_await_ack(packet, peer) # pylint: disable=assignment-from-no-return
 
         if response:
+            print(f"Moving {source=} from PENDING to REGISTERED")
             peer.state = AuthorizationState.REGISTERED
+        else:
+            print(f"{source=} did not response, Authorization State = PENDING")
 
     def network_rejoin(self, peer: "Peer") -> None:
 
@@ -219,17 +241,26 @@ class CommandsMixin:
     def start_etx(self, target: NodeID, peer: "Peer", tx_first: bool):
         now = monotonic()
         if tx_first:
+            print("ETX TX")
             self.etx_transmit(target, now)
+            print("AWAITING ETX COUNT")
             forwarded_packets = self.wait_for_etx_count(target, peer)
+            print("ETX RX")
             self.etx_receive(target, self.wait_horizon_sec) # pylint: disable=assignment-from-no-return
+            print("SENDING ETX COUNT")
             self.send_etx_count(peer)
         else:
+            print("ETX RX")
             self.etx_receive(target, self.wait_horizon_sec) # pylint: disable=assignment-from-no-return
+            print("SENDING ETX COUNT")
             self.send_etx_count(peer)
+            print("ETX TX")
             self.etx_transmit(target, now)
+            print("AWAITING ETX COUNT")
             forwarded_packets = self.wait_for_etx_count(target, peer)
 
         if forwarded_packets:
+            print("ETX COMPLETE")
             self.etx_complete(peer, forwarded_packets)
 
     def wait_for_etx_count(self, expected_source: NodeID, peer: "Peer") -> "Optional[int]":
@@ -241,7 +272,7 @@ class CommandsMixin:
             if not response:
                 continue
 
-            parameters, source, _ = response
+            parameters, source, *_ = response
 
             if source != expected_source:
                 continue

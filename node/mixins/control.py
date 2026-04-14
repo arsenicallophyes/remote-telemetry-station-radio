@@ -5,7 +5,6 @@ from time import monotonic, sleep, struct_time
 from node.mixins.state import NodeState
 from node.transport.peer import Peer
 from node.transport.peer_table import PeerTable
-from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.retransmit_state import RetransmitState
 from node.storage.persistence_manager import PersistenceManager
 from node.protocol.parameters import validate_parameters, Parameters
@@ -69,8 +68,13 @@ class ControlMixin(NodeState):
         def acquire_channel(
             self,
             packet: Packet,
-            now: "Optional[float]" = None,
-        ) -> "Tuple[Frequency, BandAirtime, float]": ...
+            now: Optional[float] = None,
+        ) -> Tuple[Frequency, BandAirtime, float]: ...
+    
+        def send_packet(
+            self,
+            packet: Packet,
+        ) -> None: ...
 
         def network_accept(
             self,
@@ -80,8 +84,8 @@ class ControlMixin(NodeState):
 
         def network_join(
             self,
-            listen_window: "Optional[float]",
-            now: "Optional[float]" = None,
+            listen_window: Optional[float],
+            now: Optional[float] = None,
         ) -> None: ...
 
     def _control_transmit_nack(
@@ -108,13 +112,7 @@ class ControlMixin(NodeState):
         while n < self.control_transmission_retries :
             n += 1
             self.acquire_channel(packet, now)
-            r.send(
-                packet.to_byte(),
-                destination=packet.target,
-                node=packet.source,
-                identifier=packet.identifier,
-                flags=packet.p_type
-            )
+            self.send_packet(packet)
 
             packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
 
@@ -168,13 +166,7 @@ class ControlMixin(NodeState):
         while n < self.control_transmission_retries :
             n += 1
             self.acquire_channel(packet, now)
-            r.send(
-                packet.to_byte(),
-                destination=packet.target,
-                node=packet.source,
-                identifier=packet.identifier,
-                flags=packet.p_type
-            )
+            self.send_packet(packet)
 
             packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
 
@@ -189,7 +181,7 @@ class ControlMixin(NodeState):
                 print("Ignoring packet", f"{message=}")
                 continue
 
-            if not message.isdecimal():
+            if not message.isdigit():
                 continue
 
             if message != ACK_MESSAGE:
@@ -203,28 +195,33 @@ class ControlMixin(NodeState):
     def control_receive(
         self,
         deadline: float,
-    ) -> "Optional[Tuple[ParametersDict, NodeID, Optional[Peer]]]":
+        timeout: "Optional[float]" = None,
+        packet_kind: PacketKindType = PacketKind.CONTROL,
+    ) -> "Optional[Tuple[ParametersDict, NodeID, Identifier, Optional[Peer]]]":
         r = self.rfm9x
-        if round(r.frequency_mhz, 1) != self.control_frequency:
-            r.frequency_mhz = self.control_frequency
+        rx_timeout = self.ack_wait if timeout is None else timeout
 
-        self.apply_link_profile(
-            self.spreading_factor,
-            self.bandwidth,
-            self.coding_rate,
-            self.control_band.erp,
-            True,
-        )
+        if packet_kind == PacketKind.CONTROL:
+            
+            if round(r.frequency_mhz, 1) != self.control_frequency:
+                r.frequency_mhz = self.control_frequency
+
+            self.apply_link_profile(
+                self.spreading_factor,
+                self.bandwidth,
+                self.coding_rate,
+                self.control_band.erp,
+                True,
+            )
+
         while monotonic() < deadline:
-
-            packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
+            packet_bytes = r.receive(with_header=True, timeout=rx_timeout)
             if packet_bytes is None:
-                print("Failed to get control packet")
                 continue
 
-            message, source, _, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
+            message, source, identifier, received_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
 
-            if packet_kind != PacketKind.CONTROL:
+            if received_kind != packet_kind:
                 continue
 
             parameters = validate_parameters(message) # pylint: disable=assignment-from-no-return
@@ -243,9 +240,9 @@ class ControlMixin(NodeState):
             peer = self.peer_table.get_peer(source)
 
             if not peer:
-                return parameters, source, None
+                return parameters, source, identifier, None
 
-            return parameters, source, peer
+            return parameters, source, identifier, peer
 
     def control_send_ack(self, target: NodeID, peer: "Optional[Peer]" = None) -> None:
         r = self.rfm9x
@@ -264,13 +261,7 @@ class ControlMixin(NodeState):
             ack_packet.identifier = peer.transmit.next_seq
 
         self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
-        r.send(
-            ack_packet.to_byte(),
-            destination=ack_packet.target,
-            node=ack_packet.source,
-            identifier=ack_packet.identifier,
-            flags=ack_packet.p_type
-        )
+        self.send_packet(ack_packet)
 
         if peer:
             peer.transmit.increment_sequence()
@@ -320,7 +311,7 @@ class ControlMixin(NodeState):
         if packet_bytes is None:
             return
 
-        message, source, identifier, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
+        message, source, _, packet_kind = self.decode_packet(packet_bytes) # pylint: disable=assignment-from-no-return
         message = str(message)
 
 
@@ -335,11 +326,6 @@ class ControlMixin(NodeState):
         if packet_kind != PacketKind.NACK:
             return
 
-        response = self.peer_table.handle_sequence(source, identifier)
-
-        if response != SequenceResponse.SUCCESS:
-            return
-
         try:
             missed_packets = tuple(int(i) for i in message.split(":"))
         except ValueError:
@@ -348,7 +334,14 @@ class ControlMixin(NodeState):
         queued_packets: "Set[Packet]" = set()
         queued_packets_identifiers: "List[int]" = []
         for i in missed_packets:
-            packet = self.persistence_manager.retrieve_packet(i)
+            # packet = self.persistence_manager.retrieve_packet(i)
+            packet = Packet(
+            self.node_id,
+            source,
+            PacketKind.DATA,
+            i,
+            f"DT=missed_packet_message {i};TS=20260414123012",
+            )
             if packet and packet.p_type == PacketKind.DATA:
                 queued_packets.add(packet)
                 queued_packets_identifiers.append(packet.identifier)
@@ -366,12 +359,6 @@ class ControlMixin(NodeState):
             message,
         )
 
-        r.send(
-            NACK_ACK_packet.to_byte(),
-            destination=NACK_ACK_packet.target,
-            node=NACK_ACK_packet.source,
-            identifier=NACK_ACK_packet.identifier,
-            flags=NACK_ACK_packet.p_type
-        )
+        self.send_packet(NACK_ACK_packet)
         peer.transmit.increment_sequence()
         self.retransmit = RetransmitState(expected_source, queued_packets)

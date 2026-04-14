@@ -28,9 +28,9 @@ class PersistenceManager:
         storage.mount(vfs, "/sd")
 
     ## Add logging message implementation
-    def log_packet(self, packet: Packet) -> None:
-        raise NotImplementedError
+    def store_packet(self, packet: Packet) -> None:
+        print(f"{{Source: {packet.source}, Type: {packet.p_type}, ID: {packet.identifier}, Message: {packet.message}}}")
+        # raise NotImplementedError
 
     def retrieve_packet(self, identifier: int) -> "Optional[Packet]":
         raise NotImplementedError
-
