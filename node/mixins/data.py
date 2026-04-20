@@ -101,6 +101,7 @@ class DataMixin(NodeState):
         def send_packet(
             self,
             packet: Packet,
+            channel_info: Optional[Tuple[Frequency, BandAirtime, float]] = None,
         ) -> None: ...
 
         def apply_link_profile(
@@ -140,7 +141,7 @@ class DataMixin(NodeState):
             peer: Peer,
         ) -> None: ...
 
-    def data_transmit(self, packet: Packet, now: "Optional[float]" = None) -> None:
+    def data_transmit(self, packet: Packet, now: "Optional[float]" = None) -> bool:
         now = monotonic() if now is None else now
         r = self.rfm9x
         packet.validate_packet()
@@ -149,18 +150,19 @@ class DataMixin(NodeState):
         # This if statement is done for the IDE type checker
         # Thus, this statement never returns
         if packet.target is None:
-            return
+            return False
 
         peer = self.peer_table.get_peer(packet.target)
         if not peer:
             print("Peer Unregistered")
-            return
+            return False
 
         if peer.state == AuthorizationState.PENDING:
             self.network_rejoin(peer)
-            return
+            return False
 
-        frequency, band, packet_time = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
+        channel_info = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
+        frequency, _, packet_time = channel_info
         arguments = str(frequency), str(packet_time)
         message = add_parameter(None, Parameters.FREQUENCY_SWITCH, *arguments)
         message = add_timestamp(self.rtc.datetime, message)
@@ -175,8 +177,8 @@ class DataMixin(NodeState):
 
         if not self.control_transmit_await_ack(control_packet, peer, now):
             print("Receiver unresponsive")
-            return
-        
+            return False
+
         print("Base switched frequency")
         r.frequency_mhz = frequency
 
@@ -188,17 +190,16 @@ class DataMixin(NodeState):
             True,
         )
         sleep(self.ack_wait)
-        if packet.identifier == 2 and not self.dropped:
-            print(f"Dropping packet ID:2, {packet.message}")
-            r.frequency_mhz = self.control_frequency
-            self.dropped = True
-            peer.transmit.increment_data_sequence()
-            return
+        # if packet.identifier == 2 and not self.dropped:
+        #     print(f"Dropping packet ID:2, {packet.message}")
+        #     r.frequency_mhz = self.control_frequency
+        #     self.dropped = True
+        #     peer.transmit.increment_data_sequence()
+        #     return True
 
-        self.send_packet(packet)
+        self.send_packet(packet, channel_info)
         if not self.retransmit:
             peer.transmit.increment_data_sequence()
-        self.dc_tracker.commit_airtime(band.name, packet_time)
 
         r.frequency_mhz = self.control_frequency
 
@@ -206,6 +207,8 @@ class DataMixin(NodeState):
             self.control_listen_NACK(packet.target, now)
         else:
             print("Done with retansmitting")
+
+        return True
 
     def data_receive(
             self,

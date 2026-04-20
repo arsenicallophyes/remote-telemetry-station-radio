@@ -64,16 +64,11 @@ class ControlMixin(NodeState):
             self,
             packet_bytes: bytearray,
         ) -> Tuple[Message, NodeID, Identifier, PacketKindType]: ...
-
-        def acquire_channel(
-            self,
-            packet: Packet,
-            now: Optional[float] = None,
-        ) -> Tuple[Frequency, BandAirtime, float]: ...
     
         def send_packet(
             self,
             packet: Packet,
+            channel_info: Optional[Tuple[Frequency, BandAirtime, float]] = None,
         ) -> None: ...
 
         def network_accept(
@@ -111,7 +106,6 @@ class ControlMixin(NodeState):
         n = 0
         while n < self.control_transmission_retries :
             n += 1
-            self.acquire_channel(packet, now)
             self.send_packet(packet)
 
             packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
@@ -165,7 +159,6 @@ class ControlMixin(NodeState):
         n = 0
         while n < self.control_transmission_retries :
             n += 1
-            self.acquire_channel(packet, now)
             self.send_packet(packet)
 
             packet_bytes = r.receive(with_header=True, timeout=self.ack_wait)
@@ -260,7 +253,6 @@ class ControlMixin(NodeState):
         if peer:
             ack_packet.identifier = peer.transmit.next_seq
 
-        self.acquire_channel(ack_packet) # pylint: disable=assignment-from-no-return
         self.send_packet(ack_packet)
 
         if peer:

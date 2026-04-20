@@ -1,4 +1,4 @@
-
+from models.model import NodeID
 class NodeType:
     """
     @dataclass
@@ -9,7 +9,7 @@ class NodeType:
         "node_id",
     )
 
-    def __init__(self, name: str, node_id : int) -> None:
+    def __init__(self, name: str, node_id : NodeID) -> None:
         self.name = name
         self.node_id = node_id
 

@@ -1,6 +1,6 @@
 from time import struct_time
 
-from models.model import Message
+from models.model import Message, NodeID
 
 try:
     from typing import TYPE_CHECKING
@@ -33,6 +33,7 @@ class Parameters:
     TIMESTAMP        = ParametersType("TS")
     FREQUENCY_SWITCH = ParametersType("FS")
     DATA             = ParametersType("DT")
+    LINK_FAILURE     = ParametersType("LF")
 
 class CommandParameters:
     """
@@ -146,6 +147,20 @@ def validate_data(args: "Tuple[Union[str, None], ...]") -> "Optional[str]":
 
     return data
 
+def validate_link_failure(args: "Tuple[Union[str, None], ...]") -> "Optional[NodeID]":
+    node_id = args[0]
+
+    if not node_id:
+        return
+
+    if not node_id.isdigit():
+        return
+
+    try:
+        return NodeID(int(node_id))
+    except ValueError:
+        return
+
 PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.TIMESTAMP : {
         "argc" : 1,
@@ -159,6 +174,10 @@ PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
         "argc": 1,
         "validator" : validate_data
     },
+    Parameters.LINK_FAILURE : {
+        "argc": 1,
+        "validator": validate_link_failure
+    }
 }
 
 COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {

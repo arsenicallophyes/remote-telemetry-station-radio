@@ -141,8 +141,17 @@ class RadioMixin:
 
         return frequency, band, packet_time
 
-    def send_packet(self, packet: Packet) -> None:
+    def send_packet(
+        self,
+        packet: Packet,
+        channel_info: "Optional[Tuple[Frequency, BandAirtime, float]]" = None,
+    ) -> None:
         r = self.rfm9x
+        if not channel_info:
+            _, band, packet_time = self.acquire_channel(packet)
+        else:
+            _, band, packet_time = channel_info
+
         r.send(
             packet.to_byte(),
             destination=packet.target,
@@ -150,3 +159,5 @@ class RadioMixin:
             identifier=packet.identifier,
             flags=packet.p_type
         )
+
+        self.dc_tracker.commit_airtime(band.name, packet_time)

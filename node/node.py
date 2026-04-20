@@ -35,6 +35,8 @@ except ImportError:
 
 if TYPE_CHECKING:
     from typing import Tuple, Optional
+    from node.base.routing_table import RoutingTable
+    from models.model import NodeID, Message
 
 # Adafruit RFM9X library does not support implicit
 # header mode, thus spreading factor 6 is not supported.
@@ -85,6 +87,8 @@ class Node(RadioMixin, UtilsMixin, ControlMixin, DataMixin, EtxMixin, CommandsMi
         self.peer_table          = PeerTable()
         self.persistence_manager = PersistenceManager("/control", "/data")
 
+        self.routing_table: "Optional[RoutingTable]" = None
+
         self.recovery     = None
         self.retransmit   = None
 
@@ -94,12 +98,15 @@ class Node(RadioMixin, UtilsMixin, ControlMixin, DataMixin, EtxMixin, CommandsMi
 
         self.__init_radio__(freq, bands)
         self.__init_rtc__()
+    
+    def install_routing_table(self, table: "RoutingTable") -> None:
+        self.routing_table = table
 
     def startup(self):
         if self.boot:
             return
         print("Attemping to join network.")
-        self.network_join(self.listen_window)
+        self.network_join(45)
         self.benchmark_all_nodes_with_etx()
         if self.peer_table.peers or self.node_id == 0:
             self.boot = True
@@ -190,6 +197,58 @@ class Node(RadioMixin, UtilsMixin, ControlMixin, DataMixin, EtxMixin, CommandsMi
 
         index = random.randint(0, len(words) -1)
         return words[index]
+    
+    def _send_data_to_next_hop(
+        self,
+        next_hop_id: "NodeID",
+        message: "Message",
+        now: float,
+        ):
+        peer = self.peer_table.get_peer(next_hop_id)
+        if not peer:
+            print(f"Next hop ID {{{next_hop_id}}} is not registered.")
+            return False
+
+        packet = Packet(
+            self.node_id,
+            next_hop_id,
+            PacketKind.DATA,
+            peer.transmit.next_data_seq,
+            message,
+        )
+
+        self.persistence_manager.store_packet(packet)
+
+        return self.data_transmit(packet, now)
+
+    def transmit_upstream(self, message: "Message", now: "Optional[float]" = None) -> bool:
+        now = monotonic() if now is None else now
+
+        if self.routing_table is None:
+            print("Routing table not installed, transmission failed.")
+            return False
+
+        primary_id = self.routing_table.parent
+        if primary_id is None:
+            print("Routing table does not have a parent, transmission failed.")
+            return False
+
+        if self._send_data_to_next_hop(primary_id, message, now):
+            return True
+
+        backup_id = self.routing_table.backup_parent
+        if backup_id is None:
+            print(f"Primary {{{primary_id}}} is unresponsive, no backup set, transmission failed.")
+            return False
+
+        failover_message = add_parameter(message, Parameters.LINK_FAILURE, str(primary_id))
+
+        if self._send_data_to_next_hop(backup_id, failover_message, now):
+            print(f"Alternative routing via {{{backup_id}}} succeeded.")
+            return True
+
+        print(f"Alternative routing via {{{backup_id}}} failed, dropping packet, transmission failed.")
+        return False
 
     def transmit(self, now: "Optional[float]"):
         now = monotonic() if now is None else now
@@ -200,24 +259,10 @@ class Node(RadioMixin, UtilsMixin, ControlMixin, DataMixin, EtxMixin, CommandsMi
 
         message = add_timestamp(self.rtc.datetime, message)
 
-        for peer in self.peer_table.peers.values():
+        self.transmit_upstream(message, now)
 
-            packet = Packet(
-                self.node_id,
-                peer.node_id,
-                PacketKind.DATA,
-                peer.transmit.next_data_seq,
-                message
-                )
-
-            self.persistence_manager.store_packet(packet)
-
-            print("Transmitting Data | data_transmit")
-            self.data_transmit(packet, now)
-
-            if self.retransmit:
-                print("Initiating Data Retransmission Mode | data_retransmit")
-                self.data_retransmission()
+        if self.retransmit:
+            self.data_retransmission()
 
         self._next_transmit = now + self.transmit_interval_sec
 

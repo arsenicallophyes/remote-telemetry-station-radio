@@ -17,7 +17,8 @@ if TYPE_CHECKING:
     from node.mac.band_airtime import WaitTime
     from node.transport.peer import Peer
     from node.transport.peer_table import PeerTable
-    from models.model import SpreadingFactor, CodingRate, Message, Identifier
+    from node.mac.band_airtime import BandAirtime
+    from models.model import SpreadingFactor, CodingRate, Message, Identifier, Frequency
     from models.packet_type import PacketKindType
     from regulations.types.model import Band
 
@@ -64,6 +65,7 @@ class EtxMixin:
         def send_packet(
             self,
             packet: Packet,
+            channel_info: Optional[Tuple[Frequency, BandAirtime, float]] = None,
         ) -> None: ...
 
     def etx_transmit(

@@ -75,15 +75,10 @@ class CommandsMixin:
             peer: Optional[Peer] = None,
         ) -> None: ...
 
-        def acquire_channel(
-            self,
-            packet: Packet,
-            now: Optional[float] = None,
-        ) -> Tuple[Frequency, BandAirtime, float]: ...
-
         def send_packet(
             self,
             packet: Packet,
+            channel_info: Optional[Tuple[Frequency, BandAirtime, float]] = None,
         ) -> None: ...
 
         def etx_receive(
@@ -125,11 +120,10 @@ class CommandsMixin:
         attempt = 0
 
         while attempt < max_attempts and monotonic() < overall_deadline:
-            self.acquire_channel(packet, now)
             self.send_packet(packet)
             sleep(0.4)
 
-            attempt_deadline  = min(monotonic() + self.ack_wait * 4, overall_deadline)
+            attempt_deadline  = min(monotonic() + self.ack_wait * 5, overall_deadline)
 
             while monotonic() < attempt_deadline :
 
@@ -169,8 +163,10 @@ class CommandsMixin:
             print(f"Peer={peer.node_id} already registered.")
             return
 
-        # Random sleep from 0.6 to 2.0s to prevent collision
-        n = random.randint(1, 15) / 10 + self.ack_wait
+        # Random sleep from 0.5 to 2.5s to prevent collision, steps of 0.3
+        # 0.5, 0.8, 1.2, 1.5, 1.8, 2.3
+
+        n = random.randrange(0, 21, 3) / 10 + self.ack_wait
         sleep(n)
 
         if self.peer_table.add_peer(source, AuthorizationState.PENDING):
@@ -199,7 +195,7 @@ class CommandsMixin:
             print(f"Moving {source=} from PENDING to REGISTERED")
             peer.state = AuthorizationState.REGISTERED
         else:
-            print(f"{source=} did not response, Authorization State = PENDING")
+            print(f"{source=} did not respond, Authorization State = PENDING")
 
     def network_rejoin(self, peer: "Peer") -> None:
 
