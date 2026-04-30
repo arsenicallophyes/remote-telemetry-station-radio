@@ -5,7 +5,7 @@ from node.transport.peer_table import PeerTable
 from node.transport.types.sequence_response import SequenceResponse
 from node.transport.types.recovery_state import RecoveryState
 from node.storage.persistence_manager import PersistenceManager
-from node.protocol.parameters import Parameters, add_parameter, add_timestamp
+from node.protocol.parameters import Parameters, ControlParameters, add_parameter, add_timestamp
 from node.transport.types.authorization_state import AuthorizationState
 
 from models.packet import Packet
@@ -36,11 +36,11 @@ if TYPE_CHECKING:
 
     from node.protocol.parameters import ParametersDict
 
-
+BASE_NODE_ID = NodeID(0)
 
 class DataMixin(NodeState):
     rfm9x:     "RFM9x"
-    node_id:   int
+    node_id:   NodeID
     rtc:       "RTC"
 
     peer_table:          PeerTable
@@ -141,6 +141,12 @@ class DataMixin(NodeState):
             peer: Peer,
         ) -> None: ...
 
+        def transmit_upstream(
+            self,
+            message: Message,
+            now: Optional[float] = None,
+        ) -> bool: ...
+
     def data_transmit(self, packet: Packet, now: "Optional[float]" = None) -> bool:
         now = monotonic() if now is None else now
         r = self.rfm9x
@@ -163,8 +169,9 @@ class DataMixin(NodeState):
 
         channel_info = self.acquire_channel(packet, now) # pylint: disable=assignment-from-no-return
         frequency, _, packet_time = channel_info
+
         arguments = str(frequency), str(packet_time)
-        message = add_parameter(None, Parameters.FREQUENCY_SWITCH, *arguments)
+        message = add_parameter(None, ControlParameters.FREQUENCY_SWITCH, *arguments)
         message = add_timestamp(self.rtc.datetime, message)
 
         control_packet = Packet(
@@ -210,6 +217,67 @@ class DataMixin(NodeState):
 
         return True
 
+    def _reconstruct_forward_message(self, parameters: "ParametersDict") -> "Optional[Message]":
+        data = parameters.get(Parameters.DATA)
+        if not isinstance(data, str):
+            return
+
+        message = add_parameter(None, Parameters.DATA, data)
+
+        timestamp = parameters.get(Parameters.TIMESTAMP)
+        if timestamp is not None:
+            message = add_timestamp(timestamp, message)
+
+        origin_id = parameters.get(Parameters.ORIGIN_ID)
+        if origin_id is not None:
+            message = add_parameter(message, Parameters.ORIGIN_ID, str(origin_id))
+
+        origin_seq = parameters.get(Parameters.ORIGIN_SEQ)
+        if origin_seq is not None:
+            message = add_parameter(message, Parameters.ORIGIN_SEQ, str(origin_seq))
+
+        link_failure = parameters.get(Parameters.LINK_FAILURE)
+        if link_failure is not None:
+            message = add_parameter(message, Parameters.LINK_FAILURE, str(link_failure))
+
+        return message
+
+    def _handle_upstream_data(
+        self,
+        parameters: "ParametersDict",
+        data: str,
+        now: float,
+    ) -> None:
+        origin_id = parameters.get(Parameters.ORIGIN_ID)
+        origin_seq = parameters.get(Parameters.ORIGIN_SEQ)
+
+        if self.node_id == BASE_NODE_ID:
+            print(f"Saving data -> '{data=}' | {origin_id=} | {origin_seq=}")
+            return
+
+        if origin_id is None:
+            print(f"Saving data -> '{data=}' | No origin id, dumping parameters | {parameters=}")
+            return
+
+        if origin_id == self.node_id:
+            print(f"Loop detected: dropping, dumping parameters | {parameters=}")
+            return
+
+        forward_message = self._reconstruct_forward_message(parameters)
+        if forward_message is None:
+            print(
+                "Unable to forward: "
+                "packet does not contain data parameter, dumping parameters  | "
+                f"{parameters=}"
+            )
+            return
+
+        response = self.transmit_upstream(forward_message, now) # pylint: disable=assignment-from-no-return
+        if response:
+            print(f"Packet forwarded from {origin_id=} {origin_seq=}")
+        else:
+            print(f"Failed to forward for {origin_id=} {origin_seq=}")
+
     def data_receive(
             self,
             frequency: Frequency,
@@ -245,6 +313,13 @@ class DataMixin(NodeState):
             if not isinstance(data, str):
                 print("Invalid Data")
                 return
+
+            failed_node = parameters.get(Parameters.LINK_FAILURE)
+            if failed_node is not None:
+                print(
+                    f"Received failover packet: "
+                    f"{source=} reports {failed_node=} to be unresponsive"
+                )
 
             if recovery_source and recovery_source != source:
                 print("Unexpected Source")
@@ -283,7 +358,7 @@ class DataMixin(NodeState):
 
             if response == SequenceResponse.SUCCESS:
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {data=}")
+                self._handle_upstream_data(parameters, data, now)
 
             if response == SequenceResponse.AHEAD:
                 nack_response = self.control_send_NACK(source, now) # pylint: disable=assignment-from-no-return
@@ -294,7 +369,8 @@ class DataMixin(NodeState):
                     else:
                         self.recovery = RecoveryState(source, nack_response, identifier)
                 self.log_peer_activity(peer, identifier)
-                print(f"Saving -> {data=}")
+
+                self._handle_upstream_data(parameters, data, now)
 
         finally:
             r.frequency_mhz = self.control_frequency
@@ -315,7 +391,7 @@ class DataMixin(NodeState):
             if rx_source != source:
                 continue
 
-            if result := parameters.get(Parameters.FREQUENCY_SWITCH):
+            if result := parameters.get(ControlParameters.FREQUENCY_SWITCH):
                 frequency, packet_time = result
                 if not (isinstance(frequency, float) and isinstance(packet_time, float)):
                     return

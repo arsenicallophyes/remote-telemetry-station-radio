@@ -1,14 +1,15 @@
 from node.node import Node
+from node.base.graph import Graph
+from node.base.distribution import RoutingDistributor
 from regulations.EU863.bands import BANDS
 
-from node.base.routing_table import RoutingTable
 from models.model import NodeID
 
 
-BASE = False
-A    = False
-B    = False
-C    = False
+BASE = False # NodeID = 0
+A    = False # NodeID = 1
+B    = False # NodeID = 2
+C    = False # NodeID = 3
 
 roles = BASE, A, B, C
 if sum(roles) != 1:
@@ -16,23 +17,23 @@ if sum(roles) != 1:
 
 if BASE:
     node = Node("Base", 0, 869.8, BANDS)
+    graph = Graph()
+    graph.add_node("A", NodeID(1))
+    graph.add_node("B", NodeID(2))
+    graph.add_node("C", NodeID(3))
+    graph.add_edge("BASE", "A", 1)
+    graph.add_edge("A", "B", 1)
+    graph.add_edge("B", "C", 1)
+
+    distributor = RoutingDistributor(node, graph)
+    node.distributor = distributor
+    node.run()
 elif A:
     node = Node("A", 1, 869.8, BANDS)
-    table = RoutingTable(NodeID(1), NodeID(0))
-    table.set_parents(parent=NodeID(0), backup=None)
-    node.install_routing_table(table)
+    node.run()
 elif B:
     node = Node("B", 2, 869.8, BANDS)
-    table = RoutingTable(NodeID(2), NodeID(0))
-    table.set_parents(parent=NodeID(1), backup=NodeID(0))
-    node.install_routing_table(table)
+    node.run()
 elif C:
     node = Node("C", 3, 869.8, BANDS)
-    table = RoutingTable(NodeID(3), NodeID(0))
-    table.set_parents(parent=NodeID(0), backup=NodeID(1))
-    node.install_routing_table(table)
-else:
-    # Redundant Check (for mypy)
-    raise SystemError(f"Only a single flag can be True. {roles=}")
-
-node.run()
+    node.run()

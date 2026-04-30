@@ -27,7 +27,7 @@ ETX_MESSAGE = 0
 
 class EtxMixin:
     rfm9x: "RFM9x"
-    node_id: int
+    node_id: NodeID
     peer_table: "PeerTable"
 
     etx_packets_count: int = 20

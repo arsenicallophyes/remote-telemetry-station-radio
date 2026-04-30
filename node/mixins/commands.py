@@ -5,7 +5,7 @@ from models.packet import Packet
 from models.packet_type import PacketKind
 from models.model import NodeID, Identifier
 
-from node.protocol.parameters import CommandParameters, add_parameter, add_timestamp
+from node.protocol.parameters import ControlParameters, add_parameter, add_timestamp
 from node.transport.peer_table import PeerTable
 from node.transport.types.authorization_state import AuthorizationState
 
@@ -30,7 +30,7 @@ BROADCAST_ADDRESS = NodeID(255)
 NETWORK_ID = b"\x0E\x1F\x7D\x2C"
 
 class CommandsMixin:
-    node_id: int
+    node_id: NodeID
     rtc:     "RTC"
 
     spreading_factor: "SpreadingFactor"
@@ -110,7 +110,7 @@ class CommandsMixin:
     ) -> None:
         now = monotonic() if now is None else now
 
-        message = add_parameter(None, CommandParameters.NETWORK_JOIN, NETWORK_ID.hex()) #  pylint: disable=assignment-from-no-return
+        message = add_parameter(None, ControlParameters.NETWORK_JOIN, NETWORK_ID.hex()) #  pylint: disable=assignment-from-no-return
         message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(self.node_id, BROADCAST_ADDRESS, PacketKind.CONTROL, 0, message)
@@ -134,7 +134,7 @@ class CommandsMixin:
 
                 parameters, source, *_ = response
 
-                seq = parameters.get(CommandParameters.NETWORK_ACCEPT)
+                seq = parameters.get(ControlParameters.NETWORK_ACCEPT)
 
                 if not isinstance(seq, int):
                     continue
@@ -177,7 +177,7 @@ class CommandsMixin:
             print(f"Peer {source=} does not exists")
             return
 
-        message = add_parameter(None, CommandParameters.NETWORK_ACCEPT, str(peer.transmit.next_seq))
+        message = add_parameter(None, ControlParameters.NETWORK_ACCEPT, str(peer.transmit.next_seq))
         message = add_timestamp(self.rtc.datetime, message)
 
 
@@ -199,7 +199,7 @@ class CommandsMixin:
 
     def network_rejoin(self, peer: "Peer") -> None:
 
-        message = add_parameter(None, CommandParameters.NETWORK_REJOIN)
+        message = add_parameter(None, ControlParameters.NETWORK_REJOIN)
         message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(
@@ -218,7 +218,7 @@ class CommandsMixin:
             tx_first = target < self.node_id
             message = add_parameter(
                 None,
-                CommandParameters.START_ETX_RX if tx_first else CommandParameters.START_ETX_TX,
+                ControlParameters.START_ETX_RX if tx_first else ControlParameters.START_ETX_TX,
             )
             message = add_timestamp(self.rtc.datetime, message)
             packet = Packet(
@@ -273,7 +273,7 @@ class CommandsMixin:
             if source != expected_source:
                 continue
 
-            result = parameters.get(CommandParameters.ETX_COUNT)
+            result = parameters.get(ControlParameters.ETX_COUNT)
 
             if not isinstance(result, int):
                 continue
@@ -282,7 +282,7 @@ class CommandsMixin:
             return result
 
     def send_etx_count(self, peer: "Peer"):
-        message = add_parameter(None, CommandParameters.ETX_COUNT, str(peer.etx_rx_count))
+        message = add_parameter(None, ControlParameters.ETX_COUNT, str(peer.etx_rx_count))
         message = add_timestamp(self.rtc.datetime, message)
 
         packet = Packet(

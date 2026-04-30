@@ -35,7 +35,7 @@ NACK_IGNORE  = "IGNORE"
 
 class ControlMixin(NodeState):
     rfm9x: "RFM9x"
-    node_id:                  int
+    node_id:                  NodeID
     peer_table:               PeerTable
     persistence_manager:      PersistenceManager
 

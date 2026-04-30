@@ -1,6 +1,6 @@
 from time import struct_time
-
 from models.model import Message, NodeID
+from node.base.routing_table import RoutingTable
 
 try:
     from typing import TYPE_CHECKING
@@ -30,21 +30,30 @@ class Parameters:
     """
     @enum
     """
-    TIMESTAMP        = ParametersType("TS")
-    FREQUENCY_SWITCH = ParametersType("FS")
-    DATA             = ParametersType("DT")
-    LINK_FAILURE     = ParametersType("LF")
+    TIMESTAMP         = ParametersType("TS")
+    DATA              = ParametersType("DT")
+    LINK_FAILURE      = ParametersType("LF")
+    ORIGIN_ID         = ParametersType("OR")
+    ORIGIN_SEQ        = ParametersType("OS")
+    DESTINATION       = ParametersType("DS")
 
-class CommandParameters:
+class ControlParameters:
     """
     @enum
     """
+    FREQUENCY_SWITCH  = ParametersType("FS")
     NETWORK_JOIN      = ParametersType("NJ")
     NETWORK_ACCEPT    = ParametersType("NA")
     NETWORK_REJOIN    = ParametersType("RJ")
     START_ETX_TX      = ParametersType("ET")
     START_ETX_RX      = ParametersType("ER")
     ETX_COUNT         = ParametersType("EC")
+
+class CommandParameters:
+    """
+    @enum
+    """
+    PATH_UPDATE       = ParametersType("PU")
 
 
 # Function used to validate parameters must either return a value
@@ -128,16 +137,21 @@ def validate_network_join(args: "Tuple[Union[str, None], ...]") -> "Optional[byt
 def validate_network_accept(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
     seq = args[0]
 
-    if not seq:
+    if seq is None or seq == "":
         return
 
     if not seq.isdigit():
         return
 
     try:
-        return int(seq)
+        seq = int(seq)
     except ValueError:
         return
+
+    if not 0 <= seq <= 255:
+        return
+
+    return seq
 
 def validate_data(args: "Tuple[Union[str, None], ...]") -> "Optional[str]":
     data = args[0]
@@ -147,28 +161,55 @@ def validate_data(args: "Tuple[Union[str, None], ...]") -> "Optional[str]":
 
     return data
 
-def validate_link_failure(args: "Tuple[Union[str, None], ...]") -> "Optional[NodeID]":
-    node_id = args[0]
-
-    if not node_id:
+def _validate_node_id_arg(raw: "Optional[str]") -> "Optional[int]":
+    if raw is None:
         return
 
-    if not node_id.isdigit():
+    if not raw.isdigit():
         return
 
     try:
-        return NodeID(int(node_id))
+        value = int(raw)
     except ValueError:
         return
+
+    if not 0 <= value <= 255:
+        return
+
+    return value
+
+def validate_link_failure(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
+    return _validate_node_id_arg(args[0])
+
+def validate_origin_id(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
+    return _validate_node_id_arg(args[0])
+
+def validate_origin_seq(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
+    return _validate_node_id_arg(args[0])
+
+def validate_destination(args: "Tuple[Union[str, None], ...]") -> "Optional[int]":
+    return _validate_node_id_arg(args[0])
+
+def validate_path_update(args: "Tuple[Union[str, None], ...]") -> "Optional[RoutingTable]":
+    raw = args[0]
+    if not raw:
+        return
+    try:
+        data = bytes.fromhex(raw)
+    except ValueError:
+        return
+    try:
+        # Placeholder node_id and base_id
+        # Receiver must overwrite it.
+        table = RoutingTable.deserialize(NodeID(0), NodeID(0), data)
+    except ValueError:
+        return
+    return table
 
 PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.TIMESTAMP : {
         "argc" : 1,
         "validator": validate_timestamp
-    },
-    Parameters.FREQUENCY_SWITCH : {
-        "argc": 2,
-        "validator" : validate_frequency_switch
     },
     Parameters.DATA : {
         "argc": 1,
@@ -177,38 +218,62 @@ PARAMETERS_RULES: "Dict[ParametersType, ParameterRule]" = {
     Parameters.LINK_FAILURE : {
         "argc": 1,
         "validator": validate_link_failure
-    }
+    },
+    Parameters.ORIGIN_ID : {
+        "argc": 1,
+        "validator": validate_origin_id
+    },
+    Parameters.ORIGIN_SEQ : {
+        "argc": 1,
+        "validator": validate_origin_seq
+    },
+    Parameters.DESTINATION : {
+        "argc": 1,
+        "validator" : validate_destination
+    },
 }
 
-COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
-    CommandParameters.NETWORK_JOIN : {
+CONTROL_RULES: "Dict[ParametersType, ParameterRule]" = {
+    ControlParameters.FREQUENCY_SWITCH : {
+        "argc": 2,
+        "validator" : validate_frequency_switch
+    },
+    ControlParameters.NETWORK_JOIN : {
         "argc" : 1,
         "validator": validate_network_join
     },
-    CommandParameters.NETWORK_ACCEPT : {
+    ControlParameters.NETWORK_ACCEPT : {
         "argc" : 1,
         "validator": validate_network_accept
     },
-    CommandParameters.NETWORK_REJOIN: {
+    ControlParameters.NETWORK_REJOIN: {
         "argc": 1,
         "validator": lambda x: True
     },
-    CommandParameters.ETX_COUNT: {
+    ControlParameters.ETX_COUNT: {
         "argc": 1,
         "validator": validate_etx_count
     },
-    CommandParameters.START_ETX_TX: {
+    ControlParameters.START_ETX_TX: {
         "argc": 1,
         "validator": lambda x: True
     },
-    CommandParameters.START_ETX_RX: {
+    ControlParameters.START_ETX_RX: {
         "argc": 1,
         "validator": lambda x: True
-    }
+    },
+}
+
+COMMAND_RULES: "Dict[ParametersType, ParameterRule]" = {
+    CommandParameters.PATH_UPDATE : {
+        "argc": 1,
+        "validator": validate_path_update
+    },
 }
 
 ALL_RULES: "Dict[ParametersType, ParameterRule]" = {}
 ALL_RULES.update(PARAMETERS_RULES)
+ALL_RULES.update(CONTROL_RULES)
 ALL_RULES.update(COMMAND_RULES)
 
 def extract_parameters(

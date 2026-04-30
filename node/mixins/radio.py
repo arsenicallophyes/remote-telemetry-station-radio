@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from node.mac.types.models import WaitTime
     from node.mac.band_airtime import BandAirtime
     from regulations.band import Band
+    from models.model import NodeID
 
 
 # Adafruit RFM9X library does not support implicit header mode,
@@ -37,7 +38,7 @@ IMPLICIT_HEADER_MODE = False
 
 
 class RadioMixin:
-    node_id : int
+    node_id : "NodeID"
     dc_tracker: DutyCycleTracker
     channels: ChannelSelect
 

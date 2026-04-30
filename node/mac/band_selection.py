@@ -51,7 +51,7 @@ class BandSelect:
             min_control_reserve_ratio,
             allow_wait_candidates,
             wait_horizon_sec,
-            now
+            now,
         )
 
     @staticmethod

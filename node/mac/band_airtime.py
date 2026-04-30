@@ -49,7 +49,7 @@ class BandAirtime:
         now = monotonic() if now is None else now
         self._prune(now)
         return UsedTime(self._used_time)
-    
+
     def used_at(self, wait: "WaitTime", now: "Optional[float]" = None) -> "UsedTime":
         now = monotonic() if now is None else now
         self._prune(now)
